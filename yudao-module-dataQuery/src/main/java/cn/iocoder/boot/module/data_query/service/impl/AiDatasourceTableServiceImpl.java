@@ -4,6 +4,7 @@ import cn.iocoder.boot.module.data_query.entity.AiDatasourceTable;
 import cn.iocoder.boot.module.data_query.framework.datasource.AiDatasourceOwnerValidator;
 import cn.iocoder.boot.module.data_query.mapper.AiDatasourceTableMapper;
 import cn.iocoder.boot.module.data_query.service.AiDatasourceTableService;
+import cn.iocoder.boot.module.data_query.service.SchemaVectorIndexSyncService;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
@@ -16,8 +17,10 @@ import org.springframework.util.Assert;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.DATASOURCE_OWNERSHIP_MISMATCH;
@@ -33,6 +36,9 @@ public class AiDatasourceTableServiceImpl extends ServiceImpl<AiDatasourceTableM
 
     @Resource
     private AiDatasourceOwnerValidator ownerValidator;
+
+    @Resource
+    private SchemaVectorIndexSyncService schemaVectorIndexSyncService;
 
     @Override
     public AiDatasourceTable getAiDatasourceTable(Long id) {
@@ -52,6 +58,8 @@ public class AiDatasourceTableServiceImpl extends ServiceImpl<AiDatasourceTableM
         ownerValidator.requireOwned(entity.getDatasourceId());
         fillCreateFields(entity);
         save(entity);
+        // 新表在向量表里还没有对应行，标脏更新不到任何记录，只能触发一次构建把它建出来
+        schemaVectorIndexSyncService.onStructureChanged(entity.getDatasourceId());
         return entity.getId();
     }
 
@@ -67,6 +75,8 @@ public class AiDatasourceTableServiceImpl extends ServiceImpl<AiDatasourceTableM
         ownerValidator.requireOwned(targetDatasourceId);
         fillUpdateFields(entity);
         updateById(entity);
+        // 名称 / 中文名 / 业务说明 / 默认时间字段都在向量 Document 正文里，改完必须重算这一行
+        schemaVectorIndexSyncService.onTablesChanged(targetDatasourceId, Collections.singletonList(entity.getId()));
     }
 
     @Override
@@ -76,6 +86,8 @@ public class AiDatasourceTableServiceImpl extends ServiceImpl<AiDatasourceTableM
         update(new LambdaUpdateWrapper<AiDatasourceTable>()
                 .eq(AiDatasourceTable::getId, id)
                 .set(AiDatasourceTable::getDeleted, 1));
+        // 该表与其列的向量行由构建侧 retireVectors 下线，这里只需触发一次增量构建
+        schemaVectorIndexSyncService.onStructureChanged(exists.getDatasourceId());
     }
 
     @Override
@@ -83,13 +95,16 @@ public class AiDatasourceTableServiceImpl extends ServiceImpl<AiDatasourceTableM
         if (ids == null || ids.isEmpty()) {
             return;
         }
+        Set<Long> datasourceIds = new LinkedHashSet<>();
         for (Long id : ids) {
             AiDatasourceTable exists = requireExists(id);
             ownerValidator.requireOwned(exists.getDatasourceId());
+            datasourceIds.add(exists.getDatasourceId());
         }
         update(new LambdaUpdateWrapper<AiDatasourceTable>()
                 .in(AiDatasourceTable::getId, ids)
                 .set(AiDatasourceTable::getDeleted, 1));
+        datasourceIds.forEach(schemaVectorIndexSyncService::onStructureChanged);
     }
 
     @Override

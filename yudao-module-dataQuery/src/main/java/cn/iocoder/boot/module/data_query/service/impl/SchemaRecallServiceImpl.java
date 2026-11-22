@@ -692,18 +692,47 @@ public class SchemaRecallServiceImpl implements SchemaRecallService {
     // ==================== 关键词提取与工具 ====================
 
     /**
-     * 轻量关键词提取：中文按 2 字滑窗 + 完整中文片段，英文/数字按词。
-     * 关键词路只是重排信号与故障兜底，不引入分词库；结果会剔除 ILIKE 通配符，
+     * 轻量关键词提取：英文/数字按词，中文「领域词最长匹配优先 + 2 字滑窗补充」。
+     *
+     * <p>纯 2 字滑窗的问题：一句「财务部上个月谁迟到了」会切出「财务/务部/部上/上个/个月/
+     * 月谁」，真正有区分度的「迟到」排第 8 位被 maxKeywords=6 截掉，导致关键词路 0 命中。
+     * 因此先用领域词表在整句上做最长匹配（命中「迟到」「财务部」这类真实业务词），
+     * 记录其字符区间；再补滑窗时跳过被区间覆盖的碎片，避免噪声重复占位。
+     *
+     * <p>关键词路只是重排信号与故障兜底，不引入分词库；结果剔除 ILIKE 通配符，
      * 并至少保留 1 个关键词，避免 &lt;foreach&gt; 展开出空的 AND () 语法错误。
      */
     private List<String> extractKeywords(String question) {
         int max = positive(properties.getMaxKeywords(), 6);
         LinkedHashSet<String> result = new LinkedHashSet<>();
+        // 已被领域词覆盖的字符区间，滑窗阶段跳过，防止「务部/部上」这类碎片占位
+        List<int[]> covered = new ArrayList<>();
         java.util.regex.Matcher ascii = ASCII_WORD.matcher(question);
         while (ascii.find() && result.size() < max) {
             addKeyword(result, ascii.group().toLowerCase());
         }
-        // 连续中文片段：整段优先，再补 2 字滑窗
+        // 1. 领域词最长匹配优先：长词先占位，子串词不再重复提取
+        List<String> domainTerms = properties.getDomainTerms();
+        if (domainTerms != null) {
+            List<String> sorted = new ArrayList<>(domainTerms);
+            sorted.sort((a, b) -> Integer.compare(b.length(), a.length()));
+            for (String term : sorted) {
+                if (result.size() >= max || !hasText(term)) {
+                    break;
+                }
+                int from = 0;
+                int at;
+                while ((at = question.indexOf(term, from)) >= 0) {
+                    addKeyword(result, term);
+                    covered.add(new int[]{at, at + term.length()});
+                    from = at + term.length();
+                    if (result.size() >= max) {
+                        break;
+                    }
+                }
+            }
+        }
+        // 2. 连续中文片段：整段优先，再补 2 字滑窗（跳过被领域词覆盖的碎片）
         String[] segments = NON_WORD.split(question);
         for (String segment : segments) {
             if (segment == null || !segment.matches(".*\\p{IsHan}.*") || segment.length() < 2) {
@@ -716,9 +745,10 @@ public class SchemaRecallServiceImpl implements SchemaRecallService {
                 }
                 for (int i = 0; i + 2 <= chinese.length() && result.size() < max; i++) {
                     String bigram = chinese.substring(i, i + 2);
-                    if (!STOP_WORDS.contains(bigram)) {
-                        addKeyword(result, bigram);
+                    if (STOP_WORDS.contains(bigram) || isCovered(covered, question, i)) {
+                        continue;
                     }
+                    addKeyword(result, bigram);
                 }
             }
         }
@@ -731,6 +761,46 @@ public class SchemaRecallServiceImpl implements SchemaRecallService {
         }
         List<String> list = new ArrayList<>(result);
         return list.size() > max ? list.subList(0, max) : list;
+    }
+
+    /**
+     * 判断中文片段中 [i, i+2) 这一滑窗是否落在已命中的领域词区间内。
+     *
+     * <p>滑窗基于去掉非中文字符的 chinese 串，而领域词区间基于原 question，
+     * 这里按中文字符出现顺序重新定位，保证两种下标口径一致。
+     */
+    private static boolean isCovered(List<int[]> covered, String question, int chineseIndex) {
+        if (covered.isEmpty()) {
+            return false;
+        }
+        // 找到 chinese 第 i、i+1 两个中文字符在 question 中的原始下标（中间可能夹标点）
+        int hanSeen = -1;
+        int qStart = -1;
+        int qEnd = -1;
+        for (int p = 0; p < question.length(); p++) {
+            if (isHan(question.charAt(p))) {
+                hanSeen++;
+                if (hanSeen == chineseIndex) {
+                    qStart = p;
+                } else if (hanSeen == chineseIndex + 1) {
+                    qEnd = p + 1;
+                    break;
+                }
+            }
+        }
+        if (qStart < 0 || qEnd < 0) {
+            return false;
+        }
+        for (int[] range : covered) {
+            if (qStart < range[1] && qEnd > range[0]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isHan(char c) {
+        return Character.UnicodeScript.of(c) == Character.UnicodeScript.HAN;
     }
 
     private void addKeyword(Set<String> result, String raw) {

@@ -115,6 +115,8 @@ mvn -DskipTests package
 ### 4.3 关键配置（`application.yaml` 的 `data-query.*`）
 
 - `data-query.embedding.enabled` / `dimension=1536`：租户 Embedding 开关与维度（必须与 `ai_schema_vector` 的 `vector(1536)` 一致）。
+- `data-query.vector.auto-rebuild-enabled` / `debounce-ms`：元数据变更后是否自动增量重建 Schema 向量索引（默认开启、防抖 2000ms）。
+  关闭后仍打 `sync_status=2` 脏标，需人工调 `POST /data-query/schema-vector/sync`。
 - `data-query.recall.*`：Schema 召回的 Top-K、RRF 权重、Token 预算、一跳关联扩展。
 - `data-query.sql-guard.*`：SQL 静态校验与只读执行的上限/脱敏（安全红线在代码中，**不可通过配置关闭**）。
 - `data-query.chat.*`：问数编排、SSE、超时；`enabled=false` 时回退 `EchoModelClient`（联调/故障降级）。

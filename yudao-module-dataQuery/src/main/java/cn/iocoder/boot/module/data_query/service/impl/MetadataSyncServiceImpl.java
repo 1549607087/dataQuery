@@ -20,6 +20,7 @@ import cn.iocoder.boot.module.data_query.mapper.AiDatasourceTableRelationMapper;
 import cn.iocoder.boot.module.data_query.mapper.AiSchemaVectorMapper;
 import cn.iocoder.boot.module.data_query.service.AiDatasourceSyncLogService;
 import cn.iocoder.boot.module.data_query.service.MetadataSyncService;
+import cn.iocoder.boot.module.data_query.service.SchemaVectorIndexSyncService;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
@@ -102,6 +103,8 @@ public class MetadataSyncServiceImpl implements MetadataSyncService {
     private AiSchemaVectorMapper vectorMapper;
     @Resource
     private AiDatasourceSyncLogService syncLogService;
+    @Resource
+    private SchemaVectorIndexSyncService schemaVectorIndexSyncService;
 
     // ==================== 同步主流程 ====================
 
@@ -160,6 +163,12 @@ public class MetadataSyncServiceImpl implements MetadataSyncService {
                 .set(AiDatasource::getSyncStatus, success ? 2 : 3)
                 .set(AiDatasource::getLastSyncTime, endTime)
                 .set(AiDatasource::getStructVersion, after));
+
+        // 同步出新表 / 删掉旧表后，向量索引不会自己长出来：不重建就永远召不到新表。
+        // 这里只触发增量构建、不批量标脏 —— content_hash 已能识别变化，全库标脏会把所有行强制重 embed。
+        if (success && after != before) {
+            schemaVectorIndexSyncService.onStructureChanged(datasourceId);
+        }
 
         int logStatus = success ? (warnings.isEmpty() ? 1 : 2) : 3;
         writeLog(ds, tenantId, taskNo, full, startTime, endTime, latencyMs,
@@ -856,6 +865,10 @@ public class MetadataSyncServiceImpl implements MetadataSyncService {
                     .in(AiSchemaVector::getColumnId, affectedColumnIds)
                     .set(AiSchemaVector::getSyncStatus, 2)
                     .set(AiSchemaVector::getUpdateTime, now));
+        }
+        // 脏标只是「待重算」的记号，真正生效要跑一次构建：隐藏/恢复的表要下线或重建向量行。
+        if (changed > 0) {
+            schemaVectorIndexSyncService.onStructureChanged(ds.getId());
         }
         return changed;
     }

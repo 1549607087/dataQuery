@@ -375,7 +375,13 @@ public class SchemaVectorBuildServiceImpl implements SchemaVectorBuildService {
                 .eq(AiSchemaVector::getDeleted, 0)));
         resp.setPendingCount(vectorMapper.selectCount(new LambdaQueryWrapperX<AiSchemaVector>()
                 .eq(AiSchemaVector::getDatasourceId, datasourceId)
-                .ne(AiSchemaVector::getSyncStatus, 1)
+                .eq(AiSchemaVector::getSyncStatus, 0)
+                .eq(AiSchemaVector::getDeleted, 0)));
+        // 与 pendingCount 分开统计：0 是「建了行还没向量」（租户没配凭证），
+        // 2 是「元数据变了、索引还是旧的」，两者的处置办法完全不同
+        resp.setPendingRebuildCount(vectorMapper.selectCount(new LambdaQueryWrapperX<AiSchemaVector>()
+                .eq(AiSchemaVector::getDatasourceId, datasourceId)
+                .eq(AiSchemaVector::getSyncStatus, 2)
                 .eq(AiSchemaVector::getDeleted, 0)));
         resp.setRetiredCount(vectorMapper.selectCount(new LambdaQueryWrapperX<AiSchemaVector>()
                 .eq(AiSchemaVector::getDatasourceId, datasourceId)
@@ -406,6 +412,10 @@ public class SchemaVectorBuildServiceImpl implements SchemaVectorBuildService {
                 + "低租户占比可能静默返回不足 Top-K");
         if (resp.getStaleCount() != null && resp.getStaleCount() > 0) {
             notes.add("存在 " + resp.getStaleCount() + " 行 struct_version 落后，建议执行 rebuild");
+        }
+        if (resp.getPendingRebuildCount() != null && resp.getPendingRebuildCount() > 0) {
+            notes.add("存在 " + resp.getPendingRebuildCount() + " 行元数据已变更、向量待重算；"
+                    + "自动重建开启时会在数秒内合并执行，持续不降请检查 data-query.vector.auto-rebuild-enabled 与构建日志");
         }
         resp.setNotes(notes);
         return resp;

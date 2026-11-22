@@ -4,6 +4,7 @@ import cn.iocoder.boot.module.data_query.entity.AiDatasourceColumnEnum;
 import cn.iocoder.boot.module.data_query.framework.datasource.AiDatasourceOwnerValidator;
 import cn.iocoder.boot.module.data_query.mapper.AiDatasourceColumnEnumMapper;
 import cn.iocoder.boot.module.data_query.service.AiDatasourceColumnEnumService;
+import cn.iocoder.boot.module.data_query.service.SchemaVectorIndexSyncService;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
@@ -16,8 +17,12 @@ import org.springframework.util.Assert;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.DATASOURCE_OWNERSHIP_MISMATCH;
@@ -33,6 +38,9 @@ public class AiDatasourceColumnEnumServiceImpl extends ServiceImpl<AiDatasourceC
 
     @Resource
     private AiDatasourceOwnerValidator ownerValidator;
+
+    @Resource
+    private SchemaVectorIndexSyncService schemaVectorIndexSyncService;
 
     @Override
     public AiDatasourceColumnEnum getAiDatasourceColumnEnum(Long id) {
@@ -52,6 +60,13 @@ public class AiDatasourceColumnEnumServiceImpl extends ServiceImpl<AiDatasourceC
         ownerValidator.requireOwned(entity.getDatasourceId());
         fillCreateFields(entity);
         save(entity);
+        // 枚举的 display_name 拼进所属列的「枚举含义」，改的是列向量，不是独立 Document
+        if (entity.getColumnId() != null) {
+            schemaVectorIndexSyncService.onColumnsChanged(entity.getDatasourceId(),
+                    Collections.singletonList(entity.getColumnId()));
+        } else {
+            schemaVectorIndexSyncService.onStructureChanged(entity.getDatasourceId());
+        }
         return entity.getId();
     }
 
@@ -67,6 +82,19 @@ public class AiDatasourceColumnEnumServiceImpl extends ServiceImpl<AiDatasourceC
         ownerValidator.requireOwned(targetDatasourceId);
         fillUpdateFields(entity);
         updateById(entity);
+        // 允许把枚举挂到另一列，迁移前后两列的「枚举含义」都变了
+        Set<Long> columnIds = new LinkedHashSet<>();
+        if (exists.getColumnId() != null) {
+            columnIds.add(exists.getColumnId());
+        }
+        if (entity.getColumnId() != null) {
+            columnIds.add(entity.getColumnId());
+        }
+        if (columnIds.isEmpty()) {
+            schemaVectorIndexSyncService.onStructureChanged(targetDatasourceId);
+        } else {
+            schemaVectorIndexSyncService.onColumnsChanged(targetDatasourceId, columnIds);
+        }
     }
 
     @Override
@@ -76,6 +104,12 @@ public class AiDatasourceColumnEnumServiceImpl extends ServiceImpl<AiDatasourceC
         update(new LambdaUpdateWrapper<AiDatasourceColumnEnum>()
                 .eq(AiDatasourceColumnEnum::getId, id)
                 .set(AiDatasourceColumnEnum::getDeleted, 1));
+        if (exists.getColumnId() != null) {
+            schemaVectorIndexSyncService.onColumnsChanged(exists.getDatasourceId(),
+                    Collections.singletonList(exists.getColumnId()));
+        } else {
+            schemaVectorIndexSyncService.onStructureChanged(exists.getDatasourceId());
+        }
     }
 
     @Override
@@ -83,13 +117,26 @@ public class AiDatasourceColumnEnumServiceImpl extends ServiceImpl<AiDatasourceC
         if (ids == null || ids.isEmpty()) {
             return;
         }
+        Map<Long, Set<Long>> columnIdsByDatasource = new LinkedHashMap<>();
         for (Long id : ids) {
             AiDatasourceColumnEnum exists = requireExists(id);
             ownerValidator.requireOwned(exists.getDatasourceId());
+            Set<Long> columnIds = columnIdsByDatasource
+                    .computeIfAbsent(exists.getDatasourceId(), key -> new LinkedHashSet<>());
+            if (exists.getColumnId() != null) {
+                columnIds.add(exists.getColumnId());
+            }
         }
         update(new LambdaUpdateWrapper<AiDatasourceColumnEnum>()
                 .in(AiDatasourceColumnEnum::getId, ids)
                 .set(AiDatasourceColumnEnum::getDeleted, 1));
+        columnIdsByDatasource.forEach((datasourceId, columnIds) -> {
+            if (columnIds.isEmpty()) {
+                schemaVectorIndexSyncService.onStructureChanged(datasourceId);
+            } else {
+                schemaVectorIndexSyncService.onColumnsChanged(datasourceId, columnIds);
+            }
+        });
     }
 
     @Override

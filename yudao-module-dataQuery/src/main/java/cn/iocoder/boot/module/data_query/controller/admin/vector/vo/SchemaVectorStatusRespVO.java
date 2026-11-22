@@ -26,8 +26,13 @@ public class SchemaVectorStatusRespVO {
     @Schema(description = "有效向量行数 / 已构建 / 待构建 / 已下线")
     private Long vectorCount;
     private Long builtCount;
+    /** sync_status = 0：建过行但 embedding 还没生成（多为租户未配置 EMBEDDING 凭证） */
     private Long pendingCount;
     private Long retiredCount;
+
+    @Schema(description = "sync_status = 2 的行数：元数据已改、索引待重算。"
+            + "持续 > 0 且不下降说明自动重建被关闭或失败，应检查 data-query.vector.auto-rebuild-enabled 与构建日志")
+    private Long pendingRebuildCount;
 
     @Schema(description = "struct_version 落后于数据源的行数（索引新鲜度）")
     private Long staleCount;
