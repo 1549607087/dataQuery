@@ -50,4 +50,7 @@ public class ModelInvocationResult {
     /** 端到端耗时（毫秒） */
     private Integer latencyMs;
 
+    /** 是否由下游主动截断（字数上限）：true 表示成功收口，不是失败、不触发重试 */
+    private Boolean aborted;
+
 }

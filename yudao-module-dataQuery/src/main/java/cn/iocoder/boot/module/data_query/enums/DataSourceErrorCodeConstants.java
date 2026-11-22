@@ -237,4 +237,10 @@ public interface DataSourceErrorCodeConstants {
     ErrorCode CHAT_CANCEL_NOT_FOUND = new ErrorCode(1_099_000_123,
             "请求已结束或不存在，无法停止");
 
+    // ==================== 流式重跑 ====================
+    ErrorCode CHAT_REGENERATE_INFLIGHT = new ErrorCode(1_099_000_124,
+            "该轮正在重新生成，请等待当前任务完成");
+    ErrorCode AI_CHAT_STREAM_MODE_UNSUPPORTED = new ErrorCode(1_099_000_125,
+            "问数模式的重跑暂不支持流式，请使用同步接口");
+
 }

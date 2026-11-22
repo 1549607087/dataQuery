@@ -48,11 +48,17 @@ public interface UnifiedChatService {
     /** 删除会话 */
     void deleteSession(String mode, Long sessionId);
 
-    /** 重新生成 */
+    /** 重新生成（同步） */
     UnifiedChatAskRespVO regenerate(String mode, Long messageId, Long modelConfigId);
 
-    /** 修改问题 */
+    /** 重新生成（流式；QUERY 模式不支持，直接抛明确错误码） */
+    UnifiedChatAskRespVO regenerate(String mode, Long messageId, Long modelConfigId, ChatStageSink sink);
+
+    /** 修改问题（同步） */
     UnifiedChatAskRespVO edit(String mode, Long messageId, String question, Long modelConfigId);
+
+    /** 修改问题（流式；QUERY 模式不支持，直接抛明确错误码） */
+    UnifiedChatAskRespVO edit(String mode, Long messageId, String question, Long modelConfigId, ChatStageSink sink);
 
     /** 赞踩 */
     void rate(String mode, Long messageId, Integer rating);

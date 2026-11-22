@@ -431,6 +431,7 @@ data-query:
     # 流式超时两段式：不能用 model-timeout-ms 一刀切，否则长回答说到一半被硬砍
     stream-first-token-ms: 15000     # 首 token 上限；此时客户端什么都没看到，可重试 / 可降级
     stream-idle-ms: 15000            # 相邻增量间隔上限；此时已提交，只能终止不换模型
+    stop-keep-min-chars: 10          # 重跑中断时至少下发多少字符才落库切版本；不足则不产生新版本、保留旧答案
     # ===== P9.3：表格 LLM 叙述化（摄取阶段，非问答热路径）=====
     # 已固化启用：需先执行 nl2sql-table-narrate.sql 并在后台启用 TABLE_NARRATE 模型绑定；
     # 未配置绑定或模型失败时自动降级保留原 " | " 表格文本，不影响文档摄取成功。

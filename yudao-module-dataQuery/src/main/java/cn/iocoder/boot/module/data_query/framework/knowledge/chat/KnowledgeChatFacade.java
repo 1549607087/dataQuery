@@ -3,6 +3,7 @@ package cn.iocoder.boot.module.data_query.framework.knowledge.chat;
 import cn.iocoder.boot.module.data_query.controller.admin.knowledge.vo.AiKnowledgeChatAskReqVO;
 import cn.iocoder.boot.module.data_query.controller.admin.knowledge.vo.AiKnowledgeChatRespVO;
 import cn.iocoder.boot.module.data_query.entity.AiKnowledgeMessage;
+import cn.iocoder.boot.module.data_query.framework.chat.ChatStageSink;
 import cn.iocoder.boot.module.data_query.entity.AiKnowledgeSession;
 import cn.iocoder.boot.module.data_query.service.KnowledgeConversationService;
 import jakarta.annotation.Resource;
@@ -42,6 +43,12 @@ public class KnowledgeChatFacade {
      * 这里仅保留角色校验，归属校验由 requireOwnedMessage 负责。
      */
     public AiKnowledgeChatRespVO regenerate(Long assistantMessageId, Long modelConfigId, Long userId) {
+        return regenerate(assistantMessageId, modelConfigId, userId, null);
+    }
+
+    /** @param sink 流式输出口；同步调用传 null，行为与旧版一致 */
+    public AiKnowledgeChatRespVO regenerate(Long assistantMessageId, Long modelConfigId, Long userId,
+                                            ChatStageSink sink) {
         AiKnowledgeMessage old = conversationService.requireOwnedMessage(assistantMessageId);
         if (!AiKnowledgeMessage.ROLE_ASSISTANT.equals(old.getRole())) {
             throw exception(CHAT_MESSAGE_ROLE_INVALID);
@@ -54,13 +61,19 @@ public class KnowledgeChatFacade {
         reqVO.setSessionId(session.getId());
         reqVO.setQuestion(question);
         reqVO.setModelConfigId(modelConfigId);
-        return orchestrator.ask(reqVO, KnowledgeMessageTreeWriter.OP_REGENERATE, old);
+        return orchestrator.ask(reqVO, sink, KnowledgeMessageTreeWriter.OP_REGENERATE, old);
     }
 
     /**
      * 修改问题：改写问题文本后从该轮重跑，生成新分支（旧 USER 及其回答整支保留）。
      */
     public AiKnowledgeChatRespVO edit(Long userMessageId, String newQuestion, Long modelConfigId, Long userId) {
+        return edit(userMessageId, newQuestion, modelConfigId, userId, null);
+    }
+
+    /** @param sink 流式输出口；同步调用传 null，行为与旧版一致 */
+    public AiKnowledgeChatRespVO edit(Long userMessageId, String newQuestion, Long modelConfigId, Long userId,
+                                      ChatStageSink sink) {
         AiKnowledgeMessage old = conversationService.requireOwnedMessage(userMessageId);
         if (!AiKnowledgeMessage.ROLE_USER.equals(old.getRole())) {
             throw exception(CHAT_MESSAGE_ROLE_INVALID);
@@ -80,7 +93,7 @@ public class KnowledgeChatFacade {
         reqVO.setSessionId(session.getId());
         reqVO.setQuestion(question);
         reqVO.setModelConfigId(modelConfigId);
-        return orchestrator.ask(reqVO, KnowledgeMessageTreeWriter.OP_EDIT, old);
+        return orchestrator.ask(reqVO, sink, KnowledgeMessageTreeWriter.OP_EDIT, old);
     }
 
     /** 源助手消息对应轮次的问题原文：优先 question 字段，缺失则沿父 USER 查 */

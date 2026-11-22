@@ -106,8 +106,10 @@ public class KnowledgeChatContext {
     private AiKnowledgeMessage sourceMessage;
     /** 新落库 USER 消息 id（写入器回填） */
     private Long userMessageId;
-    /** 新落库 ASSISTANT 消息 id（写入器回填） */
+    /** 新落库 ASSISTANT 消息 id（写入器回填；未落库时为 null） */
     private Long assistantMessageId;
+    /** 新落库 ASSISTANT 的兄弟版本号（写入器回填，供前端显示「第 N 版」） */
+    private Integer assistantVersion;
 
     // ---------- 运行时 ----------
     /** 阶段事件输出口；同步 /ask 为 null（零开销），SSE 由 Controller 注入 */

@@ -2,6 +2,7 @@ package cn.iocoder.boot.module.data_query.framework.knowledge.chat;
 
 import cn.iocoder.boot.module.data_query.entity.AiKnowledgeMessage;
 import cn.iocoder.boot.module.data_query.entity.AiKnowledgeSession;
+import cn.iocoder.boot.module.data_query.framework.knowledge.KnowledgeProperties;
 import cn.iocoder.boot.module.data_query.service.KnowledgeMessageService;
 import cn.iocoder.boot.module.data_query.service.KnowledgeSessionService;
 import jakarta.annotation.Resource;
@@ -53,13 +54,25 @@ public class KnowledgeMessageTreeWriter {
     @Resource
     private KnowledgeSessionService sessionService;
 
+    @Resource
+    private KnowledgeProperties properties;
+
     /**
-     * 事务入口：按操作类型分派。任何异常都向外抛（由编排器捕获降级），确保回滚。
+     * 事务入口：先判定本轮该不该切版本，再按操作类型分派。
      *
-     * @return 新落库的 ASSISTANT 消息 id
+     * <p>重跑失败 / 空中断时直接返回 null：不建节点、不切选中、不推进叶子。
+     * 旧答案保持在墙上，用户刷新后看到的仍是原来那份正确回答。
+     *
+     * @return 新落库的 ASSISTANT 消息 id；本轮按策略不落库时为 null
      */
     @Transactional(rollbackFor = Exception.class)
     public Long write(KnowledgeChatContext ctx) {
+        int minKeepChars = properties.getStopKeepMinChars() == null ? 10 : properties.getStopKeepMinChars();
+        if (!PromotionPolicy.shouldPersist(ctx, minKeepChars)) {
+            log.info("[knowledge-chat][message-record] 跳过落库 op={} state={} pushedChars={} traceId={}",
+                    ctx.getMessageOp(), ctx.getTerminalState(), ctx.getPushedChars(), ctx.getTraceId());
+            return null;
+        }
         String op = StringUtils.hasText(ctx.getMessageOp()) ? ctx.getMessageOp() : OP_ASK;
         return switch (op) {
             case OP_REGENERATE -> recordRegenerate(ctx);
@@ -98,6 +111,7 @@ public class KnowledgeMessageTreeWriter {
 
         ctx.setUserMessageId(userMessageId);
         ctx.setAssistantMessageId(assistantId);
+        ctx.setAssistantVersion(1);
         return assistantId;
     }
 
@@ -133,6 +147,7 @@ public class KnowledgeMessageTreeWriter {
 
         ctx.setUserMessageId(parentUser);
         ctx.setAssistantMessageId(assistantId);
+        ctx.setAssistantVersion(version);
         return assistantId;
     }
 
@@ -177,6 +192,7 @@ public class KnowledgeMessageTreeWriter {
 
         ctx.setUserMessageId(userMessageId);
         ctx.setAssistantMessageId(assistantId);
+        ctx.setAssistantVersion(1);
         return assistantId;
     }
 

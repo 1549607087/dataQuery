@@ -34,6 +34,8 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.List;
 
+import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.AI_CHAT_STREAM_MODE_UNSUPPORTED;
+import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.CHAT_MODE_INVALID;
 import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.CHAT_RESOURCE_REQUIRED;
 import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.TENANT_CONTEXT_MISSING;
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
@@ -203,28 +205,47 @@ public class UnifiedChatServiceImpl implements UnifiedChatService {
 
     @Override
     public UnifiedChatAskRespVO regenerate(String mode, Long messageId, Long modelConfigId) {
+        return regenerate(mode, messageId, modelConfigId, null);
+    }
+
+    @Override
+    public UnifiedChatAskRespVO regenerate(String mode, Long messageId, Long modelConfigId, ChatStageSink sink) {
+        if (ChatModeEnum.isKnowledge(mode)) {
+            return UnifiedChatAskRespVO.fromKnowledge(
+                    knowledgeChatFacade.regenerate(messageId, modelConfigId, currentUserId(), sink));
+        }
+        if (sink != null && ChatModeEnum.isQuery(mode)) {
+            // 问数重跑的结果是 SQL + 表格，逐字输出没有价值；且该引擎没有 sink 通道。
+            // 行为差异要显式报错，不能悄悄退化成同步、让前端以为流式生效了。
+            throw exception(AI_CHAT_STREAM_MODE_UNSUPPORTED);
+        }
         if (ChatModeEnum.isQuery(mode)) {
             return UnifiedChatAskRespVO.fromQuery(
                     queryConversationService.regenerate(messageId, null, modelConfigId, currentUserId()));
         }
-        if (ChatModeEnum.isKnowledge(mode)) {
-            return UnifiedChatAskRespVO.fromKnowledge(
-                    knowledgeChatFacade.regenerate(messageId, modelConfigId, currentUserId()));
-        }
-        throw exception(cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.CHAT_MODE_INVALID);
+        throw exception(CHAT_MODE_INVALID);
     }
 
     @Override
     public UnifiedChatAskRespVO edit(String mode, Long messageId, String question, Long modelConfigId) {
+        return edit(mode, messageId, question, modelConfigId, null);
+    }
+
+    @Override
+    public UnifiedChatAskRespVO edit(String mode, Long messageId, String question, Long modelConfigId,
+                                     ChatStageSink sink) {
+        if (ChatModeEnum.isKnowledge(mode)) {
+            return UnifiedChatAskRespVO.fromKnowledge(
+                    knowledgeChatFacade.edit(messageId, question, modelConfigId, currentUserId(), sink));
+        }
+        if (sink != null && ChatModeEnum.isQuery(mode)) {
+            throw exception(AI_CHAT_STREAM_MODE_UNSUPPORTED);
+        }
         if (ChatModeEnum.isQuery(mode)) {
             return UnifiedChatAskRespVO.fromQuery(
                     queryConversationService.edit(messageId, question, null, modelConfigId, currentUserId()));
         }
-        if (ChatModeEnum.isKnowledge(mode)) {
-            return UnifiedChatAskRespVO.fromKnowledge(
-                    knowledgeChatFacade.edit(messageId, question, modelConfigId, currentUserId()));
-        }
-        throw exception(cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.CHAT_MODE_INVALID);
+        throw exception(CHAT_MODE_INVALID);
     }
 
     @Override

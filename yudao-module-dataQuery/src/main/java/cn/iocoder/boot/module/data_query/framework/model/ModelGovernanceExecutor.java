@@ -321,6 +321,20 @@ public class ModelGovernanceExecutor {
                             nvl(result.getRequestTokens()), nvl(result.getResponseTokens()),
                             result.getRequestId(), cost, previousModelConfigId);
                     return result;
+                } catch (StreamAbortSignal ex) {
+                    // 防御分支：内置客户端已在内部消化信号并返回 aborted 结果，正常不会走到这里。
+                    // 若接入了自定义 StreamModelClient 直接把信号抛上来，也绝不能让它变成重试炸弹。
+                    log.info("[executeStream][下游主动截断，按成功收口] traceId={} modelId={} reason={}",
+                            rootTrace, config.getId(), ex.getMessage());
+                    modelCircuitBreaker.recordSuccess(config);
+                    ModelInvocationResult aborted = new ModelInvocationResult();
+                    aborted.setAborted(true);
+                    aborted.setContent(""); // 正文在编排器的 StreamingCitationGate 里，不在这里
+                    int abortedLatency = (int) (System.currentTimeMillis() - callStart);
+                    writeLog(invocation, plan, config, depth, attempt, queueWaitMs, circuitState,
+                            null, depth > 0 ? 3 : 0, abortedLatency,
+                            0, 0, null, BigDecimal.ZERO, previousModelConfigId);
+                    return aborted;
                 } catch (Exception ex) {
                     // 取消短路必须在分类之前：dispose 引起的异常不能算成下游故障
                     if (cancelToken != null && cancelToken.isCancelled()) {

@@ -20,6 +20,7 @@ import cn.iocoder.boot.module.data_query.framework.model.ModelException;
 import cn.iocoder.boot.module.data_query.framework.model.ModelGovernanceExecutor;
 import cn.iocoder.boot.module.data_query.framework.model.ModelInvocation;
 import cn.iocoder.boot.module.data_query.framework.model.ModelInvocationResult;
+import cn.iocoder.boot.module.data_query.framework.model.StreamAbortSignal;
 import cn.iocoder.boot.module.data_query.framework.model.StreamModelClient;
 import cn.iocoder.boot.module.data_query.service.AiKnowledgeBaseService;
 import cn.iocoder.boot.module.data_query.service.KnowledgeConversationService;
@@ -156,7 +157,15 @@ public class KnowledgeChatOrchestrator {
      */
     public AiKnowledgeChatRespVO ask(AiKnowledgeChatAskReqVO reqVO, String messageOp,
                                      cn.iocoder.boot.module.data_query.entity.AiKnowledgeMessage sourceMessage) {
-        return askWithMessageOp(reqVO, null, messageOp, sourceMessage);
+        return ask(reqVO, null, messageOp, sourceMessage);
+    }
+
+    /**
+     * 重跑类入口（流式 / 同步共用）：sink 非 null 时 S4 走流式模型调用，其余阶段完全一致。
+     */
+    public AiKnowledgeChatRespVO ask(AiKnowledgeChatAskReqVO reqVO, ChatStageSink sink, String messageOp,
+                                     cn.iocoder.boot.module.data_query.entity.AiKnowledgeMessage sourceMessage) {
+        return askWithMessageOp(reqVO, sink, messageOp, sourceMessage);
     }
 
     /** 真正的问答实现：messageOp / sourceMessage / sink 仅在对应入口非默认值 */
@@ -256,7 +265,9 @@ public class KnowledgeChatOrchestrator {
             }
             String rawAnswer = modelResult.getContent() == null ? "" : modelResult.getContent().trim();
             ctx.setRawAnswer(rawAnswer);
-            if (!StringUtils.hasText(rawAnswer)) {
+            // 主动截断时客户端返回的内容可能为空（自定义客户端兜底分支），
+            // 真正正文在门控里，不能按「模型返回空回答」判失败。
+            if (!StringUtils.hasText(rawAnswer) && !Boolean.TRUE.equals(modelResult.getAborted())) {
                 ctx.setErrorCode(KNOWLEDGE_CHAT_EMPTY_ANSWER.getCode());
                 ctx.setErrorMsg(KNOWLEDGE_CHAT_EMPTY_ANSWER.getMsg());
                 ctx.setAnswer(KNOWLEDGE_CHAT_EMPTY_ANSWER.getMsg());
@@ -441,7 +452,14 @@ public class KnowledgeChatOrchestrator {
                 // TTFT 必须记在门控之前：门控为了校验引用会 holdback 最多 6 个字符，
                 // 放在后面会让首字耗时被放大且随文本内容抖动
                 ctx.markFirstToken();
-                emitDelta(ctx, gate.feed(delta));
+                boolean alreadyTruncated = gate.isTruncated();
+                String allowed = gate.feed(delta);
+                emitDelta(ctx, allowed);
+                if (!alreadyTruncated && gate.isTruncated()) {
+                    // 字数上限到了：把最后允许的那一段发完后叫停供应商。
+                    // 主动控制流不能当故障——治理层与客户端都识别这个信号，按成功收口。
+                    throw new StreamAbortSignal("answer chars limit reached");
+                }
             });
         }
         return modelGovernanceExecutor.execute(invocation, modelClient);
@@ -487,28 +505,36 @@ public class KnowledgeChatOrchestrator {
         // 终态事件：done/error/stopped 的 payload 带完整统一结果，与 /ask 同口径
         if (STATE_STOPPED.equals(state)) {
             emit(ctx, "stopped", ChatStageEvent.STOPPED, "已停止生成", 100,
-                    e -> e.put("status", state)
-                            .put("sessionId", resp.getSessionId())
-                            .put("answer", resp.getAnswer())
-                            .put("stopReason", ctx.getStopReason())
-                            .put("metrics", streamMetrics(ctx)));
+                    e -> enrichTerminal(e, ctx, resp)
+                            .put("stopReason", ctx.getStopReason()));
         } else if (STATE_DONE.equals(state)) {
             emit(ctx, "done", ChatStageEvent.DONE, "问答完成", 100,
-                    e -> e.put("status", state)
-                            .put("sessionId", resp.getSessionId())
-                            .put("answer", resp.getAnswer())
-                            .put("references", resp.getReferences())
-                            .put("metrics", streamMetrics(ctx)));
+                    e -> enrichTerminal(e, ctx, resp)
+                            .put("references", resp.getReferences()));
         } else {
             emit(ctx, "error", ChatStageEvent.ERROR,
                     resp.getErrorMsg() == null ? "问答未成功：" + state : resp.getErrorMsg(), 100,
-                    e -> e.put("status", state)
-                            .put("errorCode", resp.getErrorCode())
-                            .put("sessionId", resp.getSessionId())
-                            .put("metrics", streamMetrics(ctx)));
+                    e -> enrichTerminal(e, ctx, resp)
+                            .put("errorCode", resp.getErrorCode()));
         }
         logStreamSummary(ctx, state);
         return resp;
+    }
+
+    /**
+     * 三个终态共有的 payload。persisted=false 表示本轮按版本策略没有落库：
+     * 前端据此把重跑气泡回滚到旧版本（edit 还要回滚问题气泡），否则用户刷新后会以为编辑丢了。
+     */
+    private ChatStageEvent enrichTerminal(ChatStageEvent e, KnowledgeChatContext ctx, AiKnowledgeChatRespVO resp) {
+        return e.put("status", resp.getStatus())
+                .put("sessionId", resp.getSessionId())
+                .put("answer", resp.getAnswer())
+                .put("op", ctx.getMessageOp())
+                .put("assistantMessageId", resp.getAssistantMessageId())
+                .put("userMessageId", resp.getUserMessageId())
+                .put("version", ctx.getAssistantVersion())
+                .put("persisted", resp.getAssistantMessageId() != null)
+                .put("metrics", streamMetrics(ctx));
     }
 
     /**

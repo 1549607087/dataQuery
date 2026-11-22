@@ -8,24 +8,14 @@ import cn.iocoder.boot.module.data_query.controller.admin.chat.vo.UnifiedChatMes
 import cn.iocoder.boot.module.data_query.controller.admin.chat.vo.UnifiedSessionPageReqVO;
 import cn.iocoder.boot.module.data_query.controller.admin.chat.vo.UnifiedSessionRespVO;
 import cn.iocoder.boot.module.data_query.enums.ChatModeEnum;
-import cn.iocoder.boot.module.data_query.framework.chat.ChatCancelContext;
 import cn.iocoder.boot.module.data_query.framework.chat.ChatCancelRegistry;
-import cn.iocoder.boot.module.data_query.framework.chat.ChatCancelToken;
-import cn.iocoder.boot.module.data_query.framework.chat.ChatOrchestratorProperties;
-import cn.iocoder.boot.module.data_query.framework.chat.ChatSseExecutor;
-import cn.iocoder.boot.module.data_query.framework.chat.ChatStageEvent;
-import cn.iocoder.boot.module.data_query.framework.chat.ChatStageSink;
-import cn.iocoder.boot.module.data_query.framework.chat.ChatStreamConnection;
-import cn.iocoder.boot.module.data_query.framework.chat.SseHeartbeat;
-import cn.iocoder.boot.module.data_query.framework.knowledge.KnowledgeProperties;
+import cn.iocoder.boot.module.data_query.framework.chat.ChatSseStreamer;
+import cn.iocoder.boot.module.data_query.framework.chat.StreamSpec;
 import cn.iocoder.boot.module.data_query.framework.knowledge.recall.KnowledgeRecallResult;
 import cn.iocoder.boot.module.data_query.service.KnowledgeRecallService;
 import cn.iocoder.boot.module.data_query.service.UnifiedChatService;
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
-import cn.iocoder.yudao.framework.common.util.monitor.TracerUtils;
-import cn.iocoder.yudao.framework.security.core.LoginUser;
-import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -47,10 +37,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
-import java.util.concurrent.RejectedExecutionException;
 
-import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.AI_CHAT_SSE_BUSY;
-import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.AI_CHAT_SSE_DISABLED;
 import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.CHAT_CANCEL_NOT_FOUND;
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
@@ -78,18 +65,10 @@ public class UnifiedChatController {
     private KnowledgeRecallService recallService;
 
     @Resource
-    private KnowledgeProperties knowledgeProperties;
-    @Resource
-    private ChatOrchestratorProperties chatProperties;
-
-    @Resource
-    private ChatSseExecutor chatSseExecutor;
-
-    @Resource
     private ChatCancelRegistry chatCancelRegistry;
 
     @Resource
-    private SseHeartbeat sseHeartbeat;
+    private ChatSseStreamer sseStreamer;
 
     // ==================== 提问 ====================
 
@@ -117,64 +96,9 @@ public class UnifiedChatController {
     @Operation(summary = "统一提问流式版：按阶段推送 SSE 事件")
     @PreAuthorize("@ss.hasPermission('data-query:chat:query')")
     public SseEmitter askStream(@Valid @RequestBody UnifiedChatAskReqVO reqVO, HttpServletResponse response) {
-        boolean knowledge = ChatModeEnum.isKnowledge(reqVO.getMode());
-        long timeout = resolveTimeout(knowledge);
-        boolean enabled = resolveEnabled(knowledge);
-        // 反向代理（nginx 默认 proxy_buffering on）会攒够一批才转发，前端看到的仍是「一次性蹦出」，
-        // 流式等于白做。这两个头是流式生效的前提，不是可选项。
-        response.setHeader("X-Accel-Buffering", "no");
-        response.setHeader("Cache-Control", "no-cache");
-        SseEmitter emitter = new SseEmitter(timeout);
-
-        if (!enabled) {
-            reject(emitter, AI_CHAT_SSE_DISABLED.getMsg(), AI_CHAT_SSE_DISABLED.getCode());
-            return emitter;
-        }
-        Long tenantId = TenantContextHolder.getTenantId();
-        boolean tenantIgnore = TenantContextHolder.isIgnore();
-        LoginUser loginUser = SecurityFrameworkUtils.getLoginUser();
-        if (tenantId == null || loginUser == null) {
-            reject(emitter, "缺少租户或登录上下文", AI_CHAT_SSE_DISABLED.getCode());
-            return emitter;
-        }
-
-        // 取消令牌**无条件**创建：clientRequestId 缺失、或 /cancel 开关关闭时，
-        // 仍然要支持「客户端断连即取消」，否则关页面后模型会跑完整段、token 照常计费。
-        // 只有「开关开启 + 有 clientRequestId」才登记进注册表（即可被 /cancel 定位）。
-        String clientRequestId = reqVO.getClientRequestId();
-        ChatCancelToken cancelToken = chatCancelRegistry.registerForConnection(
-                tenantId, clientRequestId, TracerUtils.getTraceId());
-
-        ChatStreamConnection connection = new ChatStreamConnection(emitter, cancelToken);
-        ChatStageSink sink = connection.sink();
-
-        // 断连兜底：Servlet 的 SseEmitter 没有 onClose，onError 只在写失败时被触发；
-        // onTimeout 是容器超时回调。两者都走 markBroken，与 send 失败共用同一条取消路径。
-        emitter.onError(ex -> connection.markBroken(ChatCancelToken.Reason.CLIENT_GONE));
-        emitter.onTimeout(() -> connection.markBroken(ChatCancelToken.Reason.TIMEOUT));
-
-        sseHeartbeat.start(connection);
-
-        try {
-            chatSseExecutor.submit(tenantId, tenantIgnore, loginUser, () -> {
-                try {
-                    ChatCancelContext.set(cancelToken);
-                    chatService.ask(reqVO, sink);
-                } catch (Exception ex) {
-                    sink.emit(errorEvent("对话链路异常，详见服务端日志", null));
-                } finally {
-                    ChatCancelContext.clear();
-                    chatCancelRegistry.remove(tenantId, clientRequestId);
-                    // 先停心跳再 complete，否则收尾竞态会写出 IllegalStateException
-                    connection.close();
-                }
-            });
-        } catch (RejectedExecutionException ex) {
-            chatCancelRegistry.remove(tenantId, clientRequestId);
-            sink.emit(errorEvent(AI_CHAT_SSE_BUSY.getMsg(), AI_CHAT_SSE_BUSY.getCode()));
-            connection.close();
-        }
-        return emitter;
+        sseStreamer.prepare(response);
+        StreamSpec spec = StreamSpec.ask(ChatModeEnum.isKnowledge(reqVO.getMode()), reqVO.getClientRequestId());
+        return sseStreamer.stream(spec, sink -> chatService.ask(reqVO, sink));
     }
 
     /**
@@ -264,12 +188,41 @@ public class UnifiedChatController {
         return success(chatService.regenerate(reqVO.getMode(), reqVO.getMessageId(), reqVO.getModelConfigId()));
     }
 
+    /**
+     * 流式重新生成：与 /regenerate 共用落库语义，只是正文逐增量下发。
+     * 终态事件带 op / version / persisted，前端据此替换气泡而不是追加。
+     */
+    @PostMapping(value = "/regenerate-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @Operation(summary = "流式重新生成：以原问题重跑并逐字返回")
+    @PreAuthorize("@ss.hasPermission('data-query:chat:query')")
+    public SseEmitter regenerateStream(@Valid @RequestBody ChatOperateReqVO.Regenerate reqVO,
+                                       HttpServletResponse response) {
+        sseStreamer.prepare(response);
+        StreamSpec spec = StreamSpec.regenerate(ChatModeEnum.isKnowledge(reqVO.getMode()),
+                reqVO.getClientRequestId(), reqVO.getMessageId());
+        return sseStreamer.stream(spec, sink -> chatService.regenerate(
+                reqVO.getMode(), reqVO.getMessageId(), reqVO.getModelConfigId(), sink));
+    }
+
     @PostMapping("/edit")
     @Operation(summary = "修改问题：改写问题后从该轮重跑，生成新分支")
     @PreAuthorize("@ss.hasPermission('data-query:chat:query')")
     public CommonResult<UnifiedChatAskRespVO> edit(@Valid @RequestBody ChatOperateReqVO.Edit reqVO) {
         return success(chatService.edit(reqVO.getMode(), reqVO.getMessageId(),
                 reqVO.getQuestion(), reqVO.getModelConfigId()));
+    }
+
+    /** 流式修改问题：新问题的正文逐增量下发，失败时前端凭 persisted=false 回滚问题气泡。 */
+    @PostMapping(value = "/edit-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @Operation(summary = "流式修改问题：改写问题后重跑并逐字返回")
+    @PreAuthorize("@ss.hasPermission('data-query:chat:query')")
+    public SseEmitter editStream(@Valid @RequestBody ChatOperateReqVO.Edit reqVO,
+                                 HttpServletResponse response) {
+        sseStreamer.prepare(response);
+        StreamSpec spec = StreamSpec.edit(ChatModeEnum.isKnowledge(reqVO.getMode()),
+                reqVO.getClientRequestId(), reqVO.getMessageId());
+        return sseStreamer.stream(spec, sink -> chatService.edit(
+                reqVO.getMode(), reqVO.getMessageId(), reqVO.getQuestion(), reqVO.getModelConfigId(), sink));
     }
 
     @PostMapping("/rating")
@@ -307,29 +260,4 @@ public class UnifiedChatController {
         return success(resp);
     }
 
-    // ==================== 工具 ====================
-
-    private boolean resolveEnabled(boolean knowledge) {
-        Boolean enabled = knowledge ? knowledgeProperties.getSseEnabled() : chatProperties.getSseEnabled();
-        return !Boolean.FALSE.equals(enabled);
-    }
-
-    private long resolveTimeout(boolean knowledge) {
-        Integer ms = knowledge ? knowledgeProperties.getSseTimeoutMs() : chatProperties.getSseTimeoutMs();
-        long value = ms == null ? 70000L : ms.longValue();
-        return value <= 0 ? 70000L : value;
-    }
-
-    private static ChatStageEvent errorEvent(String message, Integer errorCode) {
-        return ChatStageEvent.of("error", ChatStageEvent.ERROR, message, 100)
-                .put("status", "FAILED")
-                .put("errorCode", errorCode);
-    }
-
-    /** 早退路径（开关关闭 / 上下文缺失）没有业务要跑：发一个错误事件即收尾。 */
-    private static void reject(SseEmitter emitter, String message, Integer errorCode) {
-        ChatStreamConnection rejected = new ChatStreamConnection(emitter, null);
-        rejected.sink().emit(errorEvent(message, errorCode));
-        rejected.close();
-    }
 }

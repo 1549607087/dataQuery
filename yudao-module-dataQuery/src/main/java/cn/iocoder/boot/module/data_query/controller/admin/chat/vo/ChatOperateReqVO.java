@@ -35,6 +35,10 @@ public final class ChatOperateReqVO {
 
         @Schema(description = "模型配置编号（可选，仅作为路由偏好）")
         private Long modelConfigId;
+
+        @Schema(description = "客户端请求编号（流式重跑用：停止按钮与在途去重都依赖它）")
+        @Size(max = 64, message = "请求编号不能超过 64 字符")
+        private String clientRequestId;
     }
 
     /** 修改问题：改写问题后从该轮重跑，生成新分支 */
@@ -57,6 +61,10 @@ public final class ChatOperateReqVO {
 
         @Schema(description = "模型配置编号（可选，仅作为路由偏好）")
         private Long modelConfigId;
+
+        @Schema(description = "客户端请求编号（流式重跑用：停止按钮与在途去重都依赖它）")
+        @Size(max = 64, message = "请求编号不能超过 64 字符")
+        private String clientRequestId;
     }
 
     /** 赞踩：-1 踩 / 0 取消 / 1 赞 */

@@ -190,7 +190,8 @@ public class TenantOpenAiChatModelClient implements ModelClient, StreamModelClie
             try {
                 return streamWithUsageFallback(tenantId, provider, config, invocation, sink,
                         connectTimeoutMs, firstTokenMs, idleMs);
-            } catch (CancelledException | ModelException ex) {
+            } catch (CancelledException | StreamAbortSignal | ModelException ex) {
+                // 主动截断与用户取消都不是故障，不能被 classify 包成可重试错误
                 throw ex;
             } catch (Exception ex) {
                 ModelErrorCategory category = classify(ex);
@@ -225,6 +226,9 @@ public class TenantOpenAiChatModelClient implements ModelClient, StreamModelClie
             return doStream(tenantId, provider, config, invocation, countingSink,
                     true, connectTimeoutMs, firstTokenMs, idleMs);
         } catch (Exception ex) {
+            if (ex instanceof StreamAbortSignal) {
+                throw ex;
+            }
             ModelErrorCategory category = ex instanceof ModelException me
                     ? me.getCategory() : ModelErrorCategory.from(ex);
             if (category == ModelErrorCategory.BAD_REQUEST && emittedChars.get() == 0) {
@@ -260,6 +264,8 @@ public class TenantOpenAiChatModelClient implements ModelClient, StreamModelClie
         AtomicInteger totalTokens = new AtomicInteger(0);
         AtomicBoolean usageSeen = new AtomicBoolean(false);
         AtomicReference<Throwable> failure = new AtomicReference<>();
+        // 下游主动截断（字数上限）：不是故障，不能走 failure → classify → 重试
+        AtomicBoolean aborted = new AtomicBoolean();
         CountDownLatch finished = new CountDownLatch(1);
 
         Flux<String> flux = client.post()
@@ -281,7 +287,15 @@ public class TenantOpenAiChatModelClient implements ModelClient, StreamModelClie
                 .doFinally(signal -> finished.countDown())
                 .subscribe(frame -> onFrame(frame, sink, content, requestId, modelName,
                                 promptTokens, completionTokens, totalTokens, usageSeen),
-                        failure::set);
+                        err -> {
+                            // onNext 里抛 StreamAbortSignal → Reactor 调 onError 并自动 cancel 上游。
+                            // 这里只记「主动截断」，绝不把它塞进 failure，否则会被当成可重试故障。
+                            if (err instanceof StreamAbortSignal) {
+                                aborted.set(true);
+                            } else {
+                                failure.set(err);
+                            }
+                        });
 
         ChatCancelToken cancelToken = invocation.getCancelToken();
         if (cancelToken != null) {
@@ -302,23 +316,28 @@ public class TenantOpenAiChatModelClient implements ModelClient, StreamModelClie
                 cancelToken.unregister(subscription);
             }
         }
-        // 取消时 Reactor 走 cancel 信号（doFinally 已放行 await），不会给 onError，必须在这里显式判定
-        if (cancelToken != null && cancelToken.isCancelled()) {
-            subscription.dispose();
-            throw new CancelledException(cancelToken.getClientRequestId());
-        }
-        Throwable error = failure.get();
-        if (error != null) {
-            if (error instanceof RuntimeException runtimeException) {
-                throw runtimeException;
+        // 主动截断属于成功收口：跳过取消 / 故障 / 空内容判定，带着已累积文本正常返回。
+        // 此时上游已经被 Reactor 取消，供应商停止生成，后半段不再计费。
+        if (!aborted.get()) {
+            // 取消时 Reactor 走 cancel 信号（doFinally 已放行 await），不会给 onError，必须在这里显式判定
+            if (cancelToken != null && cancelToken.isCancelled()) {
+                subscription.dispose();
+                throw new CancelledException(cancelToken.getClientRequestId());
             }
-            throw new IllegalStateException(error.getMessage(), error);
-        }
-        if (content.length() == 0) {
-            throw new IllegalStateException("Chat 流式响应 content 为空");
+            Throwable error = failure.get();
+            if (error != null) {
+                if (error instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
+                }
+                throw new IllegalStateException(error.getMessage(), error);
+            }
+            if (content.length() == 0) {
+                throw new IllegalStateException("Chat 流式响应 content 为空");
+            }
         }
 
         ModelInvocationResult result = new ModelInvocationResult();
+        result.setAborted(aborted.get());
         result.setContent(content.toString());
         result.setEcho(Boolean.FALSE);
         result.setRequestId(requestId.get());
