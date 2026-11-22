@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.iocoder.boot.module.data_query.mapper.AiModelGrayExperimentMapper">
+
+    <resultMap id="BaseResultMap" type="cn.iocoder.boot.module.data_query.entity.AiModelGrayExperiment">
+            <id property="id" column="id" />
+            <result property="tenantId" column="tenant_id" />
+            <result property="name" column="name" />
+            <result property="grayObject" column="gray_object" />
+            <result property="sceneCode" column="scene_code" />
+            <result property="bindingId" column="binding_id" />
+            <result property="baselineModelId" column="baseline_model_id" />
+            <result property="grayModelId" column="gray_model_id" />
+            <result property="baselinePromptId" column="baseline_prompt_id" />
+            <result property="grayPromptId" column="gray_prompt_id" />
+            <result property="grayRatio" column="gray_ratio" />
+            <result property="bucketKey" column="bucket_key" />
+            <result property="startTime" column="start_time" />
+            <result property="endTime" column="end_time" />
+            <result property="minSampleSize" column="min_sample_size" />
+            <result property="metrics" column="metrics" />
+            <result property="status" column="status" />
+            <result property="conclusion" column="conclusion" />
+            <result property="sort" column="sort" />
+            <result property="remark" column="remark" />
+            <result property="creator" column="creator" />
+            <result property="createTime" column="create_time" />
+            <result property="updater" column="updater" />
+            <result property="updateTime" column="update_time" />
+            <result property="deleted" column="deleted" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,tenant_id,name,gray_object,scene_code,binding_id,
+        baseline_model_id,gray_model_id,baseline_prompt_id,gray_prompt_id,gray_ratio,
+        bucket_key,start_time,end_time,min_sample_size,metrics,
+        status,conclusion,sort,remark,creator,
+        create_time,updater,update_time,deleted
+    </sql>
+</mapper>

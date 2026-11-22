@@ -15,6 +15,7 @@
         <!-- 各种 module 拓展 -->
         <module>yudao-module-system</module>
         <module>yudao-module-infra</module>
+        <module>yudao-module-dataQuery</module>
 <!--        <module>yudao-module-member</module>-->
 <!--        <module>yudao-module-bpm</module>-->
 <!--        <module>yudao-module-report</module>-->
@@ -51,7 +52,8 @@
         <flatten-maven-plugin.version>1.7.2</flatten-maven-plugin.version>
 
         <lombok.version>1.18.48</lombok.version>
-        <spring.boot.version>3.5.15</spring.boot.version>
+        <spring.boot.version>4.1.2</spring.boot.version>
+        <spring-ai.version>2.0.1</spring-ai.version>
         <mapstruct.version>1.7.0.Beta2</mapstruct.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
@@ -62,6 +64,13 @@
                 <groupId>cn.iocoder.boot</groupId>
                 <artifactId>yudao-dependencies</artifactId>
                 <version>${revision}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

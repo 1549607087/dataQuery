@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.iocoder.boot.module.data_query.mapper.AiPromptVariableMapper">
+
+    <resultMap id="BaseResultMap" type="cn.iocoder.boot.module.data_query.entity.AiPromptVariable">
+            <id property="id" column="id" />
+            <result property="promptId" column="prompt_id" />
+            <result property="sceneCode" column="scene_code" />
+            <result property="varName" column="var_name" />
+            <result property="varLabel" column="var_label" />
+            <result property="varType" column="var_type" />
+            <result property="sourceType" column="source_type" />
+            <result property="sourceKey" column="source_key" />
+            <result property="required" column="required" />
+            <result property="defaultValue" column="default_value" />
+            <result property="sampleValue" column="sample_value" />
+            <result property="validateRegex" column="validate_regex" />
+            <result property="maxLength" column="max_length" />
+            <result property="status" column="status" />
+            <result property="sort" column="sort" />
+            <result property="remark" column="remark" />
+            <result property="tenantId" column="tenant_id" />
+            <result property="creator" column="creator" />
+            <result property="createTime" column="create_time" />
+            <result property="updater" column="updater" />
+            <result property="updateTime" column="update_time" />
+            <result property="deleted" column="deleted" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,prompt_id,scene_code,var_name,var_label,var_type,
+        source_type,source_key,required,default_value,sample_value,
+        validate_regex,max_length,status,sort,remark,
+        tenant_id,creator,create_time,updater,update_time,
+        deleted
+    </sql>
+</mapper>

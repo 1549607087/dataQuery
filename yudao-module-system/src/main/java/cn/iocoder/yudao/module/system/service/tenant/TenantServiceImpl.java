@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.system.service.tenant;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.ObjectUtil;
+import cn.iocoder.yudao.framework.common.biz.system.tenant.TenantCreatedEvent;
 import cn.iocoder.yudao.framework.common.enums.CommonStatusEnum;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.collection.CollectionUtils;
@@ -33,6 +34,7 @@ import com.baomidou.dynamic.datasource.annotation.DSTransactional;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.validation.annotation.Validated;
@@ -61,6 +63,10 @@ public class TenantServiceImpl implements TenantService {
 
     @Resource
     private TenantMapper tenantMapper;
+
+    /** 租户创建事件发布器：供各业务模块订阅初始化，避免 system 反向依赖业务模块 */
+    @Resource
+    private ApplicationEventPublisher eventPublisher;
 
     @Resource
     private TenantPackageService tenantPackageService;
@@ -117,6 +123,10 @@ public class TenantServiceImpl implements TenantService {
             // 修改租户的管理员
             tenantMapper.updateById(new TenantDO().setId(tenant.getId()).setContactUserId(userId));
         });
+        // 发布租户创建事件：业务模块（如 dataQuery 的 AiTenantInitListener）订阅后初始化自己的配置。
+        // 事件类是 yudao-common 里的普通 POJO，system 不需要反向依赖业务模块；
+        // 监听方必须自行兜底异常，不能让初始化失败阻断租户创建主流程。
+        eventPublisher.publishEvent(new TenantCreatedEvent(tenant.getId()));
         return tenant.getId();
     }
 

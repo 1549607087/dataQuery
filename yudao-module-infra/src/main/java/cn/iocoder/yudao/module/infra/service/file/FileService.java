@@ -87,6 +87,26 @@ public interface FileService {
     byte[] getFileContent(Long configId, String path) throws Exception;
 
     /**
+     * 按完整访问 URL 获得文件内容。
+     *
+     * 供知识库等异步消费场景使用：调用方只持有 createFile 返回的 url，
+     * 本方法内部按 url 反查 FileDO（取 configId + path）后读取内容，避免调用方
+     * 直接依赖 infra 的 DAL 层。找不到文件记录时抛 FILE_NOT_EXISTS。
+     *
+     * @param url 完整的文件访问地址
+     * @return 文件内容
+     */
+    byte[] getFileContentByUrl(@NotEmpty(message = "URL 不能为空") String url) throws Exception;
+
+    /**
+     * 按完整访问 URL 获得文件元数据。
+     *
+     * @param url 完整的文件访问地址
+     * @return 文件记录，不存在时返回 null
+     */
+    FileDO getFileByUrl(String url);
+
+    /**
      * 获得文件
      *
      * @param configId 配置编号

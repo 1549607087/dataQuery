@@ -8,7 +8,9 @@ spring:
     exclude:
       - org.springframework.boot.autoconfigure.quartz.QuartzAutoConfiguration # 默认 local 环境，不开启 Quartz 的自动配置
       - org.springframework.ai.vectorstore.qdrant.autoconfigure.QdrantVectorStoreAutoConfiguration # 禁用 AI 模块的 Qdrant，手动创建
-      - org.springframework.ai.vectorstore.milvus.autoconfigure.MilvusVectorStoreAutoConfiguration # 禁用 AI 模块的 Milvus，手动创建
+      # P2：Milvus starter 已从 yudao-module-dataQuery 移除，其自动配置类不在 classpath，
+      # 这里不能继续 exclude（Spring Boot 会对不存在的自动配置类报启动错误）；
+      # dataQuery 的 Schema 向量改为自建 ai_schema_vector DAO，不使用任何 VectorStore Bean。
   # 数据源配置项
   datasource:
     druid: # Druid 【监控】相关的全局配置
@@ -42,8 +44,10 @@ spring:
         test-while-idle: true
         test-on-borrow: false
         test-on-return: false
-        pool-prepared-statements: true # 是否开启 PreparedStatement 缓存
-        max-pool-prepared-statement-per-connection-size: 20 # 每个连接缓存的 PreparedStatement 数量
+        pool-prepared-statements: false # 关闭 PSCache：避免复用已关闭的 Statement（MyBatis-Plus 3.5.17 cursor 路径）
+        # 严禁配置 max-pool-prepared-statement-per-connection-size > 0：
+        # Druid 1.2.28 的 setMaxPoolPreparedStatementPerConnectionSize(int n) 会执行
+        # poolPreparedStatements = (n > 0)，把上面的 false 强制改回 true，导致 PSCache 重新开启。
       primary: master
       datasource:
         master:
@@ -264,6 +268,7 @@ yudao:
 justauth:
   enabled: true
   type:
+    # noinspection SpringBootApplicationYaml
     DINGTALK_V2: # 钉钉（新版登录）
       client-id: dingvrnreaje3yqvzhxg
       client-secret: i8E6iZyDvZj51JIb0tYsYfVQYOks9Cq1lgryEjFRqC79P3iJcrxEwT6Qk2QvLrLI

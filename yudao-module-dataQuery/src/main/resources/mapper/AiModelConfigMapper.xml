@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.iocoder.boot.module.data_query.mapper.AiModelConfigMapper">
+
+    <resultMap id="BaseResultMap" type="cn.iocoder.boot.module.data_query.entity.AiModelConfig">
+            <id property="id" column="id" />
+            <result property="providerId" column="provider_id" />
+            <result property="name" column="name" />
+            <result property="modelId" column="model_id" />
+            <result property="modelType" column="model_type" />
+            <result property="capability" column="capability" />
+            <result property="contextWindow" column="context_window" />
+            <result property="maxOutputTokens" column="max_output_tokens" />
+            <result property="defaultParams" column="default_params" />
+            <result property="supportStream" column="support_stream" />
+            <result property="inputPrice" column="input_price" />
+            <result property="outputPrice" column="output_price" />
+            <result property="currency" column="currency" />
+            <result property="qpsLimit" column="qps_limit" />
+            <result property="concurrentLimit" column="concurrent_limit" />
+            <result property="timeoutMs" column="timeout_ms" />
+            <result property="retryCount" column="retry_count" />
+            <result property="status" column="status" />
+            <result property="grayRatio" column="gray_ratio" />
+            <result property="healthStatus" column="health_status" />
+            <result property="lastCheckTime" column="last_check_time" />
+            <result property="lastCheckResult" column="last_check_result" />
+            <result property="sort" column="sort" />
+            <result property="remark" column="remark" />
+            <result property="tenantId" column="tenant_id" />
+            <result property="creator" column="creator" />
+            <result property="createTime" column="create_time" />
+            <result property="updater" column="updater" />
+            <result property="updateTime" column="update_time" />
+            <result property="deleted" column="deleted" />
+            <result property="circuitEnabled" column="circuit_enabled" />
+            <result property="circuitFailureRate" column="circuit_failure_rate" />
+            <result property="circuitMinSample" column="circuit_min_sample" />
+            <result property="circuitWindowSeconds" column="circuit_window_seconds" />
+            <result property="circuitOpenSeconds" column="circuit_open_seconds" />
+            <result property="circuitHalfOpenProbes" column="circuit_half_open_probes" />
+            <result property="retryableErrors" column="retryable_errors" />
+            <result property="retryBaseBackoffMs" column="retry_base_backoff_ms" />
+            <result property="retryMaxBackoffMs" column="retry_max_backoff_ms" />
+            <result property="retryJitterRatio" column="retry_jitter_ratio" />
+            <result property="circuitKey" column="circuit_key" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,provider_id,name,model_id,model_type,capability,
+        context_window,max_output_tokens,default_params,support_stream,input_price,
+        output_price,currency,qps_limit,concurrent_limit,timeout_ms,
+        retry_count,status,gray_ratio,health_status,last_check_time,
+        last_check_result,sort,remark,tenant_id,creator,
+        create_time,updater,update_time,deleted,circuit_enabled,
+        circuit_failure_rate,circuit_min_sample,circuit_window_seconds,circuit_open_seconds,circuit_half_open_probes,
+        retryable_errors,retry_base_backoff_ms,retry_max_backoff_ms,retry_jitter_ratio,circuit_key
+    </sql>
+</mapper>

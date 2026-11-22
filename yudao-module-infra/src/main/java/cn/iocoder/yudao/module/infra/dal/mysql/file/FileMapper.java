@@ -30,4 +30,16 @@ public interface FileMapper extends BaseMapperX<FileDO> {
                 .orderByAsc(FileDO::getId));
     }
 
+    /**
+     * 按完整访问 URL 反查最新的文件记录。
+     *
+     * 供知识库异步消费端按 createFile 返回的 url 读回内容使用。
+     * 同一 url 可能被重复上传覆盖，取 id 最大的一条。
+     */
+    default FileDO selectLatestByUrl(String url) {
+        return selectLastOne(new LambdaQueryWrapperX<FileDO>()
+                .eq(FileDO::getUrl, url)
+                .orderByAsc(FileDO::getId));
+    }
+
 }

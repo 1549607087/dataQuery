@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.iocoder.boot.module.data_query.mapper.AiModelSceneBindingMapper">
+
+    <resultMap id="BaseResultMap" type="cn.iocoder.boot.module.data_query.entity.AiModelSceneBinding">
+            <id property="id" column="id" />
+            <result property="sceneCode" column="scene_code" />
+            <result property="sceneName" column="scene_name" />
+            <result property="primaryModelId" column="primary_model_id" />
+            <result property="fallbackModelIds" column="fallback_model_ids" />
+            <result property="routeStrategy" column="route_strategy" />
+            <result property="promptId" column="prompt_id" />
+            <result property="temperatureOverride" column="temperature_override" />
+            <result property="enabled" column="enabled" />
+            <result property="sort" column="sort" />
+            <result property="remark" column="remark" />
+            <result property="tenantId" column="tenant_id" />
+            <result property="creator" column="creator" />
+            <result property="createTime" column="create_time" />
+            <result property="updater" column="updater" />
+            <result property="updateTime" column="update_time" />
+            <result property="deleted" column="deleted" />
+            <result property="timeoutMsOverride" column="timeout_ms_override" />
+            <result property="qpsLimitOverride" column="qps_limit_override" />
+            <result property="concurrentLimitOverride" column="concurrent_limit_override" />
+            <result property="retryCountOverride" column="retry_count_override" />
+            <result property="fallbackCrossProvider" column="fallback_cross_provider" />
+            <result property="fallbackMaxDepth" column="fallback_max_depth" />
+            <result property="grayRatio" column="gray_ratio" />
+            <result property="grayBucketKey" column="gray_bucket_key" />
+            <result property="grayExperimentId" column="gray_experiment_id" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,scene_code,scene_name,primary_model_id,fallback_model_ids,route_strategy,
+        prompt_id,temperature_override,enabled,sort,remark,
+        tenant_id,creator,create_time,updater,update_time,
+        deleted,timeout_ms_override,qps_limit_override,concurrent_limit_override,retry_count_override,
+        fallback_cross_provider,fallback_max_depth,gray_ratio,gray_bucket_key,gray_experiment_id
+    </sql>
+</mapper>

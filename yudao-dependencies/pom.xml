@@ -37,6 +37,10 @@
         <iotdb.version>2.0.8</iotdb.version>  <!-- TODO 特殊：暂不升级 2.0.10/2.0.11，其 TablePreparedStatement.execute 不设置 ResultSet，导致 Mapper 的 SELECT 为空、COUNT 为 null -->
         <!-- 消息队列 -->
         <rocketmq-spring.version>2.3.6</rocketmq-spring.version>
+        <!-- P9 知识库：原生 Java SDK（rocketmq-client-java，gRPC + Proxy 模式）。
+             RocketMQ 部署在 Docker，通过 Proxy 接入点(endpoint:8081)连接，客户端不直连 broker，
+             规避 nameServer 返回 broker 容器 IP 的问题；不走 rocketmq-spring-boot-starter。 -->
+        <rocketmq-client-java.version>5.2.0</rocketmq-client-java.version>
         <!-- 服务保障相关 -->
         <lock4j.version>2.2.7</lock4j.version>
         <!-- 监控相关 -->
@@ -348,6 +352,12 @@
                         <artifactId>fastjson</artifactId>
                     </exclusion>
                 </exclusions>
+            </dependency>
+            <!-- P9 知识库专用：gRPC 原生客户端（Proxy 模式），与 starter 的 Remoting 客户端是不同 artifact，可共存 -->
+            <dependency>
+                <groupId>org.apache.rocketmq</groupId>
+                <artifactId>rocketmq-client-java</artifactId>
+                <version>${rocketmq-client-java.version}</version>
             </dependency>
 
             <!-- 服务保障相关 -->

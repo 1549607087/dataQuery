@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.iocoder.boot.module.data_query.mapper.AiModelCircuitStateMapper">
+
+    <resultMap id="BaseResultMap" type="cn.iocoder.boot.module.data_query.entity.AiModelCircuitState">
+            <id property="id" column="id" />
+            <result property="tenantId" column="tenant_id" />
+            <result property="modelConfigId" column="model_config_id" />
+            <result property="circuitKey" column="circuit_key" />
+            <result property="state" column="state" />
+            <result property="windowStartTime" column="window_start_time" />
+            <result property="windowTotal" column="window_total" />
+            <result property="windowFailed" column="window_failed" />
+            <result property="windowSucceeded" column="window_succeeded" />
+            <result property="failureRate" column="failure_rate" />
+            <result property="consecutiveFailures" column="consecutive_failures" />
+            <result property="consecutiveSuccesses" column="consecutive_successes" />
+            <result property="lastFailureTime" column="last_failure_time" />
+            <result property="lastFailureCategory" column="last_failure_category" />
+            <result property="openedTime" column="opened_time" />
+            <result property="openUntil" column="open_until" />
+            <result property="halfOpenProbes" column="half_open_probes" />
+            <result property="halfOpenSucceeded" column="half_open_succeeded" />
+            <result property="version" column="version" />
+            <result property="remark" column="remark" />
+            <result property="creator" column="creator" />
+            <result property="createTime" column="create_time" />
+            <result property="updater" column="updater" />
+            <result property="updateTime" column="update_time" />
+            <result property="deleted" column="deleted" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,tenant_id,model_config_id,circuit_key,state,window_start_time,
+        window_total,window_failed,window_succeeded,failure_rate,consecutive_failures,
+        consecutive_successes,last_failure_time,last_failure_category,opened_time,open_until,
+        half_open_probes,half_open_succeeded,version,remark,creator,
+        create_time,updater,update_time,deleted
+    </sql>
+</mapper>

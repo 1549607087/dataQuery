@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.iocoder.boot.module.data_query.mapper.AiModelCallLogMapper">
+
+    <resultMap id="BaseResultMap" type="cn.iocoder.boot.module.data_query.entity.AiModelCallLog">
+            <id property="id" column="id" />
+            <result property="traceId" column="trace_id" />
+            <result property="conversationId" column="conversation_id" />
+            <result property="sceneCode" column="scene_code" />
+            <result property="providerId" column="provider_id" />
+            <result property="modelConfigId" column="model_config_id" />
+            <result property="modelId" column="model_id" />
+            <result property="requestTokens" column="request_tokens" />
+            <result property="responseTokens" column="response_tokens" />
+            <result property="totalTokens" column="total_tokens" />
+            <result property="cost" column="cost" />
+            <result property="latencyMs" column="latency_ms" />
+            <result property="status" column="status" />
+            <result property="fallbackFromModelId" column="fallback_from_model_id" />
+            <result property="errorCode" column="error_code" />
+            <result property="errorMsg" column="error_msg" />
+            <result property="userId" column="user_id" />
+            <result property="tenantId" column="tenant_id" />
+            <result property="creator" column="creator" />
+            <result property="createTime" column="create_time" />
+            <result property="updater" column="updater" />
+            <result property="updateTime" column="update_time" />
+            <result property="deleted" column="deleted" />
+            <result property="isGray" column="is_gray" />
+            <result property="grayGroup" column="gray_group" />
+            <result property="grayExperimentId" column="gray_experiment_id" />
+            <result property="grayBucketKey" column="gray_bucket_key" />
+            <result property="retryOfTraceId" column="retry_of_trace_id" />
+            <result property="retryIndex" column="retry_index" />
+            <result property="circuitState" column="circuit_state" />
+            <result property="circuitKey" column="circuit_key" />
+            <result property="errorCategory" column="error_category" />
+            <result property="fallbackDepth" column="fallback_depth" />
+            <result property="routeStrategy" column="route_strategy" />
+            <result property="queueWaitMs" column="queue_wait_ms" />
+            <result property="requestId" column="request_id" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,trace_id,conversation_id,scene_code,provider_id,model_config_id,
+        model_id,request_tokens,response_tokens,total_tokens,cost,
+        latency_ms,status,fallback_from_model_id,error_code,error_msg,
+        user_id,tenant_id,creator,create_time,updater,
+        update_time,deleted,is_gray,gray_group,gray_experiment_id,
+        gray_bucket_key,retry_of_trace_id,retry_index,circuit_state,circuit_key,
+        error_category,fallback_depth,route_strategy,queue_wait_ms,request_id
+    </sql>
+</mapper>

@@ -160,13 +160,10 @@ spring:
         collection-name: knowledge_segment # Qdrant 中向量集合的名称：用于存储向量数据的集合标识符，所有相关的向量操作都会在这个集合中进行
         host: 127.0.0.1
         port: 6334
-      milvus:
-        initialize-schema: true
-        database-name: default # Milvus 中数据库的名称
-        collection-name: knowledge_segment # Milvus 中集合的名称：用于存储向量数据的集合标识符，所有相关的向量操作都会在这个集合中进行
-        client:
-          host: 127.0.0.1
-          port: 19530
+    # 说明：以上 Redis / Qdrant 段属于平台其他模块（yudao-module-ai），保留以免影响既有知识库功能。
+    # dataQuery 模块的 Schema 向量不使用任何 Spring AI VectorStore Bean：
+    # Milvus starter 已移除；向量表 ai_schema_vector 自建 DAO，检索 SQL 显式带 tenant_id 硬过滤。
+    # 每租户 Embedding 客户端由 TenantSchemaEmbeddingProvider 按租户动态构造，见下方 data-query.embedding。
     openai: # OpenAI 官方
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}
       api-key: ${OPENAI_API_KEY:sk-xxxx}
@@ -334,6 +331,13 @@ yudao:
       - /admin-api/system/user/profile/**
       - /admin-api/system/auth/**
     ignore-tables:
+      # 平台共享 + 租户可覆盖：仅提示词 4 张表，放行后由 SharedTenantServiceImpl 显式限定可见/可写租户范围。
+      # 数据源连接、元数据、同步日志及模型/治理相关表一律租户私有，严禁登记在此。
+      # 新增平台共享表必须同步登记（否则会被追加 tenant_id = ? 导致查不到），且必须接入共享基类避免跨租户泄露。
+      - ai_prompt_scene
+      - ai_prompt
+      - ai_prompt_version
+      - ai_prompt_variable
     ignore-caches:
       - user_role_ids
       - permission_menu_ids
@@ -370,5 +374,153 @@ yudao:
       type: redis # 消息总线的类型
     storage:
       type: tdengine # 时序存储的类型：tdengine、iotdb，需要配置同名的 spring.datasource.dynamic.datasource 数据源
+
+# ===== dataQuery 模块：P2 按租户动态 Embedding =====
+# 置 enabled=false 立即回退 P1 的「待构建」占位实现（Document 完整入库但向量为 NULL），
+# 用于供应商故障时的运维降级；不会伪造向量、不会偷偷改用平台共享 Key。
+data-query:
+  # ===== 停止回答（流式 ask 取消能力）=====
+  cancel:
+    enabled: true              # 关闭后 /cancel 不生效，行为回到「断流不中断、继续跑完落库」的旧版
+    token-ttl-ms: 300000       # 在途令牌保留时长，超时惰性清理，防止异常路径未 remove 导致泄漏
+  embedding:
+    enabled: true
+    dimension: 1536 # 必须与 ai_schema_vector.embedding 的 vector(1536) 列一致
+    connect-timeout-ms: 5000
+    read-timeout-ms: 30000
+    send-dimensions: true # 向支持 dimensions 的供应商声明维度；兼容网关不接受时改为 false，写入侧仍强校验维度
+  # ===== P9.1：知识库 RAG 文档摄取（事务消息 + gRPC Proxy 异步解析） =====
+  knowledge:
+    max-file-size-mb: 20
+    allowed-file-types: [TXT, MD, PDF, DOC, DOCX]
+    chunk-size: 500          # 单切片 token 上限（字符近似口径，中文1字≈1token）
+    chunk-overlap-ratio: 0.2 # 相邻切片重叠占 chunk-size 的比例（500×0.2=100 token），段内段间都保留
+    # 切分策略：结构块优先成段，超长段按 段落\n\n>换行\n>句末>逗号>空格>字符 递归降级切分，
+    # 切点吸附语义边界。改切分算法会使 chunk 的 content_hash 变化，需对全库 rebuild 一次。
+    embedding-batch-size: 32 # 每批向量化文本条数
+    mq:
+      enabled: true         # 默认关闭：本地无 RocketMQ 时走同步摄取兜底；接好 Proxy 后改 true
+      endpoints: 127.0.0.1:8080 # gRPC Proxy 接入点（host:8081），不是 nameServer 地址
+      topic: data-query-knowledge-doc-parse # 需 message.type=TRANSACTION
+      tag: parse
+      consumer-group: data-query-knowledge-doc-parse-consumer
+      max-attempts: 3
+      consume-thread-count: 4
+      max-consume-attempts: 5 # 毒消息超过次数后跳过（返回 SUCCESS），避免无限重投
+    # ===== P9.2：知识库问答（混合召回 + 运行时）=====
+    # 安全边界不可通过配置关闭：租户私有表、base_id 归属校验、context/history 只由服务端注入、
+    # 引用编号越界即删除；下面只调相关性与运行参数。
+    top-k: 6                        # 进入上下文的切片数（裁剪后上限）
+    vector-candidates: 20           # 向量路候选数（B-tree 预过滤后进入 RRF）
+    keyword-candidates: 20          # 关键词路候选数
+    max-keywords: 6                 # 问题关键词提取上限，控制 ILIKE 分支数
+    rrf-k: 60                       # RRF 常数 K，score = Σ weight / (K + rank)
+    vector-weight: 1.0
+    keyword-weight: 1.0
+    context-token-budget: 6000      # context 正文 Token 硬预算，超出按片裁剪并标记 truncated
+    keyword-fallback-enabled: true  # 置 false 时向量不可用直接返回空召回（排障用），绝不借别租户模型
+    max-question-length: 500
+    max-answer-chars: 8000          # 回答落库字符上限，防止超长回答撑爆消息表
+    history-max-messages: 6         # 拼 history 最多取几条消息（6 = 3 轮）
+    history-token-budget: 1500      # history Token 预算，超出从最旧的一条开始丢
+    model-timeout-ms: 60000         # RAG 回答较长，比治理层默认 8s 放宽
+    prompt-injection-guard-enabled: true
+    # ===== P9.3：知识库 SSE 流式问答（与智能问数 chat.sse-* 解耦）=====
+    sse-enabled: true                # 统一对话 /data-query/chat/ask-stream 的知识库分支开关
+    sse-timeout-ms: 300000           # SseEmitter 绝对超时（心跳不续期）；30 字/s 出 8000 字需 ~267s，5 分钟兜底
+    # 流式超时两段式：不能用 model-timeout-ms 一刀切，否则长回答说到一半被硬砍
+    stream-first-token-ms: 15000     # 首 token 上限；此时客户端什么都没看到，可重试 / 可降级
+    stream-idle-ms: 15000            # 相邻增量间隔上限；此时已提交，只能终止不换模型
+    # ===== P9.3：表格 LLM 叙述化（摄取阶段，非问答热路径）=====
+    # 已固化启用：需先执行 nl2sql-table-narrate.sql 并在后台启用 TABLE_NARRATE 模型绑定；
+    # 未配置绑定或模型失败时自动降级保留原 " | " 表格文本，不影响文档摄取成功。
+    table-narrate-token-budget: 2000      # 单次请求输入 token 预算
+    table-narrate-batch-rows: 40          # 单次最多表格行数
+    table-narrate-timeout-ms: 30000       # 表格描述比问答慢，放宽超时
+    table-narrate-bridge-ratio: 0.2       # 相邻段桥接上一段结尾 20%
+    table-narrate-segment-ratio: 0.5      # 叙述本体占 chunkSize 比例（原 0.8），留空间给前后讲解正文同片
+    table-narrate-min-cell-coverage: 0.8  # 单元格覆盖率下限，防幻觉
+    table-narrate-max-batches-per-table: 10 # 单表最多送几批，防超大表卡死消费
+    # ===== P9.3b：Top-K 专用 Rerank 精排（问答热路径）=====
+    # 已固化启用：需先执行 nl2sql-rerank.sql，并在后台为 RERANK 场景绑定
+    # model_type=3 模型、录入本租户凭证、启用绑定；
+    # 任何失败（未配置/超时/限流/分数非法）都降级回 RRF 原序，不影响问答主链路。
+    rerank:
+      timeout-ms: 1500               # 硬超时，与模型配置 timeout 取更小值，远小于 model-timeout-ms
+      connect-timeout-ms: 2000
+      protocol: DASHSCOPE            # DASHSCOPE（专用路径） / COHERE（/v1/rerank 兼容）
+      rerank-path: ''                # 覆盖默认路径；留空用 protocol 默认
+      top-n: 0                       # 0=不传 top_n（返回全部 K 条分数，不扩大候选池）
+  # ===== P3：S3 Schema 召回（一期精确扫描 + RRF 混合重排 + 关键词兜底） =====
+  # 安全边界不可通过配置关闭：tenant_id 只取服务端上下文；两路 SQL 都硬过滤；
+  # 召回结果再经 PG 元数据二次核验。下面只调相关性与 Token 预算。
+  recall:
+    top-k-tables: 6 # 最终返回的表数量上限
+    vector-candidates: 20 # 向量路「表级、列级各自」的候选数（不是两者相加）
+    keyword-candidates: 20 # 关键词路「表级、列级各自」的候选数（口径同上）
+    max-columns-per-table: 20 # 每表最多带入 SchemaContext / S6 白名单的列数
+    max-keywords: 6 # 从问题提取的关键词上限，控制 ILIKE 分支数与 SQL 长度
+    rrf-k: 60 # RRF 融合常数 K，score = Σ weight / (K + rank)
+    vector-weight: 1.0
+    keyword-weight: 1.0
+    column-to-table-weight: 0.45 # 列级命中折算到表的系数，避免列淹没表级命中
+    fact-table-boost: 0.15 # table_role=1 事实表的额外加成
+    schema-token-budget: 6000 # Schema 文本 Token 硬预算，超出按表裁剪并标记 truncated
+    keyword-fallback-enabled: true # 置 false 时 Embedding 不可用直接返回空召回（排障用），绝不借别租户模型
+    # 一跳关联扩展：命中表经已验证外键把维表拉进选集（如预约表 -> oa_user 取 real_name）
+    relation-expand-enabled: true # 关闭后恢复旧行为，只召回直接命中的表
+    max-expand-tables: 2 # 一跳最多扩展几张关联表，防止维表撑爆 Schema / 白名单
+  # ===== P4：S6 SQL 静态校验 + S7 只读执行 =====
+  # 安全红线（单语句、语句类型白名单、内置禁用基线、PG 元数据二次核验、
+  # 白名单取交集、强制 LIMIT、只读连接）不可通过配置关闭；这里只调上限与脱敏。
+  sql-guard:
+    max-sql-length: 8000 # 抽取后 SQL 文本字符上限
+    max-subqueries: 3 # 子查询 / CTE 个数上限
+    max-tables: 8 # 单条 SQL 可引用的物理表数
+    max-columns: 80 # 单条 SQL 可引用的列数（去重后）
+    max-joins: 5 # 与 ai_datasource.sql_rules.max_joins 取较小值
+    default-max-rows: 1000 # 与 ai_datasource.max_rows 取较小值；无 LIMIT 时强制追加该值
+    max-query-timeout-ms: 10000 # 问数侧收紧超时，与 ai_datasource.query_timeout_ms 取较小值
+    fetch-size: 500
+    mask-placeholder: "******"
+    mask-sensitive-by-default: true # sensitive_type > 0 但没配 mask_rule 的列也脱敏
+    # 只能追加禁用项，内置基线不可删；留空即只用内置基线
+    extra-deny-functions: []
+    extra-deny-keywords: []
+  # ===== P5-A：表结构一键导入（预览 + 创建数据源 + 全量同步 + 向量索引） =====
+  # 安全边界不在这里：租户归属、驱动白名单、系统 schema 排除、S6/S7 白名单交集全部沿用既有实现。
+  metadata-import:
+    max-tables: 500 # 单次导入表数硬上限，防止未配白名单时误扫整库
+    max-preview-tables: 200 # 预览响应里最多回传多少张表的明细（总数仍按真实值返回）
+    max-columns-per-preview-table: 20 # 每张预览表最多回传多少个字段名
+    default-max-rows: 1000 # 一键创建数据源时的返回行数上限
+    build-vector-by-default: true # 导入后自动构建向量索引；失败或未接线只告警、不回滚元数据
+    default-ds-type: 2 # 未指定数据库类型时默认 PostgreSQL
+  # ===== P5：问数编排器 + 真实 Chat 模型客户端 =====
+  # 安全红线不在这里：数据源归属、租户固化、S3 服务端召回白名单、S6/S7 闸门
+  # 与「模型原始文本绝不直接进 JDBC」全部是代码硬约束，无法通过本配置关闭。
+  # enabled=false 时回退到 EchoModelClient（联调 / 供应商故障时的运维降级）。
+  chat:
+    enabled: true
+    max-question-length: 500 # 问题长度上限（字符），超出直接拒绝
+    history-rounds: 5 # 会话历史带入轮数
+    followup-rewrite-enabled: true # A 方案：会话内追问结合上一轮问题做规则改写后再召回（纯规则，零 LLM 调用）；关闭后召回只看当前轮问题
+    max-fix-rounds: 2 # SQL_FIX + S6/S7 共享的模型修正总预算，用完即停
+    max-intent-rounds: 1 # 意图 / 改写前置模型调用上限；一期意图用规则，不调用模型
+    prompt-injection-guard-enabled: true # 提示词注入 / 越权特征检测，建议常开
+    result-summary-enabled: false # S8 结果解读开关；失败或超时不阻断主结果
+    template-fallback-enabled: false # S5 失败时是否走参数化模板降级（一期未落模板）
+    total-timeout-ms: 60000 # 单次 ask 端到端硬超时
+    model-timeout-ms: 30000 # 单次 Chat 调用 HTTP 读超时
+    model-connect-timeout-ms: 5000 # Chat 客户端连接超时
+    summary-timeout-ms: 10000 # resultSummary 场景额外超时
+    # ===== P6：SSE 阶段流 + S8 结果加工 =====
+    sse-enabled: true # /ask-stream 总开关；关闭后流式端点返回明确的拒绝事件
+    sse-max-threads: 32 # 并发流上限（固定大小线程池，空闲 60s 回收）；ThreadPoolExecutor 只在队列满时才扩容，故不再单设核心线程数
+    sse-queue-capacity: 64 # 并发流打满后排队，队列也满则拒绝（073），不占 Tomcat 线程等待
+    heartbeat-interval-ms: 15000 # SSE 心跳间隔（注释帧 :ping），兼作断连写探针；<=0 关闭
+    sse-timeout-ms: 70000 # SseEmitter 绝对超时（心跳不续期），需 > total-timeout-ms
+    chart-suggestion-enabled: true # 规则图表推荐（不调用模型、不额外查询）
+    result-explain-enabled: true # 结构化口径说明（不输出业务数据行）
 
 debug: false

@@ -315,4 +315,18 @@ public class FileServiceImpl implements FileService {
         return fileMapper.selectLatestByConfigIdAndPath(configId, path);
     }
 
+    @Override
+    public FileDO getFileByUrl(String url) {
+        return fileMapper.selectLatestByUrl(url);
+    }
+
+    @Override
+    public byte[] getFileContentByUrl(String url) throws Exception {
+        FileDO file = getFileByUrl(url);
+        if (file == null) {
+            throw exception(FILE_NOT_EXISTS);
+        }
+        return getFileContent(file.getConfigId(), file.getPath());
+    }
+
 }

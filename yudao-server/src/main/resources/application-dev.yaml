@@ -8,7 +8,7 @@ spring:
     # noinspection SpringBootApplicationYaml
     exclude:
       - org.springframework.ai.vectorstore.qdrant.autoconfigure.QdrantVectorStoreAutoConfiguration # 禁用 AI 模块的 Qdrant，手动创建
-      - org.springframework.ai.vectorstore.milvus.autoconfigure.MilvusVectorStoreAutoConfiguration # 禁用 AI 模块的 Milvus，手动创建
+      # P2：Milvus starter 已移除，自动配置类不在 classpath，不能继续 exclude（见 application-local.yaml 说明）
   # 数据源配置项
   datasource:
     druid: # Druid 【监控】相关的全局配置
@@ -38,12 +38,14 @@ spring:
         time-between-eviction-runs-millis: 60000 # 配置间隔多久才进行一次检测，检测需要关闭的空闲连接，单位：毫秒（1 分钟）
         min-evictable-idle-time-millis: 600000 # 配置一个连接在池中最小生存的时间，单位：毫秒（10 分钟）
         max-evictable-idle-time-millis: 1800000 # 配置一个连接在池中最大生存的时间，单位：毫秒（30 分钟）
-        validation-query: SELECT 1 FROM DUAL # 配置检测连接是否有效
+        validation-query: SELECT 1 # 配置检测连接是否有效（PostgreSQL 无 DUAL 表）
         test-while-idle: true
         test-on-borrow: false
         test-on-return: false
-        pool-prepared-statements: true # 是否开启 PreparedStatement 缓存
-        max-pool-prepared-statement-per-connection-size: 20 # 每个连接缓存的 PreparedStatement 数量
+        pool-prepared-statements: false # 关闭 PSCache：避免复用已关闭的 Statement（MyBatis-Plus 3.5.17 cursor 路径）
+        # 严禁配置 max-pool-prepared-statement-per-connection-size > 0：
+        # Druid 1.2.28 的 setMaxPoolPreparedStatementPerConnectionSize(int n) 会执行
+        # poolPreparedStatements = (n > 0)，把上面的 false 强制改回 true，导致 PSCache 重新开启。
       primary: master
       datasource:
         master:
@@ -115,7 +117,7 @@ spring:
 
 --- #################### 消息队列相关 ####################
 
-# rocketmq 配置项，对应 RocketMQProperties 配置类
+# @TableId(value = "id", type = IdType.ASSIGN_ID)mq 配置项，对应 @TableId(value = "id", type = IdType.ASSIGN_ID)Properties 配置类
 rocketmq:
   name-server: 127.0.0.1:9876 # RocketMQ Namesrv
 
@@ -199,6 +201,7 @@ yudao:
 justauth:
   enabled: true
   type:
+    # noinspection SpringBootApplicationYaml
     DINGTALK_V2: # 钉钉（新版登录）
       client-id: dingvrnreaje3yqvzhxg
       client-secret: i8E6iZyDvZj51JIb0tYsYfVQYOks9Cq1lgryEjFRqC79P3iJcrxEwT6Qk2QvLrLI
