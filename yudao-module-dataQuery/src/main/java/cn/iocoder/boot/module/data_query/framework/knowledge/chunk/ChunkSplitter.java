@@ -75,6 +75,28 @@ public class ChunkSplitter {
         return Math.max(1, (int) Math.round(sum));
     }
 
+    /**
+     * 按 token 预算取前缀，口径与 {@link #estimateTokens(String)} 完全一致：
+     * CJK 一字≈1 token，其余（英文/数字/标点/空白）4 字符≈1 token。
+     *
+     * <p>用于精排入参截断：中文 256 token 约 256 字，英文 256 token 约 1024 字符，
+     * 避免「256 字符」对英文片段过短而误判相关性。
+     */
+    public static String previewByTokenBudget(String text, int tokenBudget) {
+        if (text == null || text.isEmpty() || tokenBudget <= 0) {
+            return "";
+        }
+        double used = 0;
+        for (int i = 0; i < text.length(); i++) {
+            double cost = charCost(text.charAt(i));
+            if (used + cost > tokenBudget) {
+                return i == 0 ? text.substring(0, 1) : text.substring(0, i);
+            }
+            used += cost;
+        }
+        return text;
+    }
+
     // ==================== 主流程 ====================
 
     /**

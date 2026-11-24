@@ -483,11 +483,11 @@ public class TenantOpenAiChatModelClient implements ModelClient, StreamModelClie
                     "tenantId=" + tenantId + " 未找到 providerId=" + config.getProviderId() + " 的供应商配置");
         }
         AiModelProvider provider = list.get(0);
-        String protocol = StringUtils.hasText(provider.getProtocol())
-                ? provider.getProtocol().trim().toUpperCase(Locale.ROOT) : PROTOCOL_OPENAI;
+        // 协议已下沉到模型配置：Chat 只支持 OpenAI 兼容格式
+        String protocol = resolveProtocol(config, provider, PROTOCOL_OPENAI);
         if (!PROTOCOL_OPENAI.equals(protocol)) {
             throw new ModelException(ModelErrorCategory.CONFIG_ERROR,
-                    "供应商协议 " + protocol + " 暂不支持，P5 仅支持 OPENAI 兼容协议");
+                    "模型协议 " + protocol + " 暂不支持，Chat 仅支持 OPENAI 兼容协议");
         }
         if (!StringUtils.hasText(provider.getApiKey()) || !StringUtils.hasText(provider.getBaseUrl())
                 || !StringUtils.hasText(config.getModelId())) {
@@ -495,6 +495,18 @@ public class TenantOpenAiChatModelClient implements ModelClient, StreamModelClie
                     "tenantId=" + tenantId + " 的 Chat 凭证 / base_url / model_id 不完整");
         }
         return provider;
+    }
+
+    /** 模型协议优先（协议已下沉到模型配置层），存量数据回退供应商，最后用调用方默认值 */
+    private String resolveProtocol(AiModelConfig config, AiModelProvider provider, String fallback) {
+        String value = config != null ? config.getProtocol() : null;
+        if (!StringUtils.hasText(value) && provider != null) {
+            value = provider.getProtocol();
+        }
+        if (!StringUtils.hasText(value)) {
+            return fallback;
+        }
+        return value.trim().toUpperCase(Locale.ROOT);
     }
 
     // ==================== 可取消调用（WebClient） ====================

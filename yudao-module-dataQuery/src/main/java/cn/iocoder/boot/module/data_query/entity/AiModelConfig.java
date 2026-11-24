@@ -46,6 +46,12 @@ public class AiModelConfig {
     private Integer modelType;
 
     /**
+     * 协议（模型级）：Chat/Embedding/SQL 固定 OPENAI；Rerank 可选 DASHSCOPE / COHERE
+     */
+    @TableField(value = "protocol")
+    private String protocol;
+
+    /**
      * 能力标签 JSON：streaming / function_call / json_mode / vision
      */
     @TableField(value = "capability")

@@ -35,6 +35,9 @@ public class AiModelConfigSaveReqVO {
     @NotNull(message = "模型类型不能为空")
     private Integer modelType;
 
+    @Schema(description = "协议：Chat/Embedding/SQL 固定 OPENAI；Rerank 可选 DASHSCOPE / COHERE；留空按模型类型自动补默认值", example = "OPENAI")
+    private String protocol;
+
     @Schema(description = "能力标签 JSON：streaming / function_call / json_mode / vision")
     private String capability;
 

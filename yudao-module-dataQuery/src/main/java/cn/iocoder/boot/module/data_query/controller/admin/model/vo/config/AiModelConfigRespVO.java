@@ -36,6 +36,10 @@ public class AiModelConfigRespVO {
     @ExcelProperty("模型类型")
     private Integer modelType;
 
+    @Schema(description = "协议：Chat/Embedding/SQL 固定 OPENAI；Rerank 可选 DASHSCOPE / COHERE")
+    @ExcelProperty("协议")
+    private String protocol;
+
     @Schema(description = "能力标签 JSON")
     private String capability;
 

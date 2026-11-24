@@ -136,7 +136,7 @@ mvn -DskipTests package
 | 分组 | 测试类 |
 |---|---|
 | 知识库 Controller / Service | `AiKnowledgeBaseControllerTest`、`AiKnowledgeDocumentControllerTest`、`AiKnowledgeDocumentServiceTest` |
-| 解析与切块 | `TxtMarkdownParserTest`、`SpringAiMarkdownParserTest`、`ChunkSplitterTest`、`DocumentTextRewriterTest`、`TableNarrateServiceTest` |
+| 解析与切块 | `TxtMarkdownParserTest`、`SpringAiMarkdownParserTest`、`PdfDocumentParserTest`、`ChunkSplitterTest`、`DocumentTextRewriterTest`、`TableNarrateServiceTest` |
 | 摄取 | `KnowledgeIngestServiceTest`、`KnowledgeMessageTreeWriterTest` |
 | 版本管理 | `KnowledgeDocumentVersionServiceTest`、`KnowledgeVersionCommitServiceTest`、`KnowledgeVersionUtilTest` |
 | 召回 | `KnowledgeRecallServiceImplTest`、`TenantRerankProviderTest` |

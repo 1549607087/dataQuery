@@ -38,8 +38,8 @@ public class KnowledgeProperties {
 
     // ==================== P9.2 知识库问答：检索参数 ====================
 
-    /** 检索返回的切片数（裁剪后最多保留） */
-    private Integer topK = 6;
+    /** 检索返回的切片数（裁剪后最多保留）；4 片 × chunkSize 500 ≈ 2000 token，留足回答空间 */
+    private Integer topK = 4;
 
     /** 向量路候选数（B-tree 预过滤后进入 RRF 的条数） */
     private Integer vectorCandidates = 20;
@@ -84,11 +84,11 @@ public class KnowledgeProperties {
     /** 模型回答落库最大字符数 */
     private Integer maxAnswerChars = 8000;
 
-    /** 拼 history 时最多取多少条历史消息（默认 6 = 3 轮） */
-    private Integer historyMaxMessages = 6;
+    /** 拼 history 时最多取多少条历史消息（默认 4 = 2 轮） */
+    private Integer historyMaxMessages = 4;
 
-    /** history 变量 Token 预算 */
-    private Integer historyTokenBudget = 1500;
+    /** history 变量 Token 预算（中文一字≈1 token，800 约合两轮短问答） */
+    private Integer historyTokenBudget = 800;
 
     /** RAG 模型调用超时（毫秒）；治理层默认 8s 对长回答偏短 */
     private Integer modelTimeoutMs = 60000;

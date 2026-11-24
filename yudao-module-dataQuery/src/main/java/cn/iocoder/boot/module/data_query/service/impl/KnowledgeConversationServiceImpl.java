@@ -2,6 +2,7 @@ package cn.iocoder.boot.module.data_query.service.impl;
 
 import cn.iocoder.boot.module.data_query.entity.AiKnowledgeMessage;
 import cn.iocoder.boot.module.data_query.entity.AiKnowledgeSession;
+import cn.iocoder.boot.module.data_query.framework.knowledge.chunk.ChunkSplitter;
 import cn.iocoder.boot.module.data_query.service.KnowledgeConversationService;
 import cn.iocoder.boot.module.data_query.service.KnowledgeMessageService;
 import cn.iocoder.boot.module.data_query.service.KnowledgeSessionService;
@@ -252,11 +253,12 @@ public class KnowledgeConversationServiceImpl implements KnowledgeConversationSe
             if (line == null) {
                 continue;
             }
-            if (!lines.isEmpty() && used + line.length() > tokenBudget) {
+            int cost = ChunkSplitter.estimateTokens(line + "\n");
+            if (!lines.isEmpty() && used + cost > tokenBudget) {
                 break;
             }
             lines.addFirst(line);
-            used += line.length() + 1;
+            used += cost;
             if (AiKnowledgeMessage.ROLE_ASSISTANT.equals(m.getRole())) {
                 turns++;
             }

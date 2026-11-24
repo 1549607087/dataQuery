@@ -22,6 +22,9 @@ public class AiModelConfigSimpleRespVO {
     @Schema(description = "类型：1 Chat、2 Embedding、3 Rerank、4 SQL 专用")
     private Integer modelType;
 
+    @Schema(description = "协议：Chat/Embedding/SQL 固定 OPENAI；Rerank 可选 DASHSCOPE / COHERE")
+    private String protocol;
+
     @Schema(description = "是否支持流式：0 否、1 是")
     private Integer supportStream;
 

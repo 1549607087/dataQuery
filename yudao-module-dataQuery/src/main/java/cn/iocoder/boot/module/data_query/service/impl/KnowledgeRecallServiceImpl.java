@@ -2,6 +2,7 @@ package cn.iocoder.boot.module.data_query.service.impl;
 
 import cn.iocoder.boot.module.data_query.entity.AiKnowledgeBase;
 import cn.iocoder.boot.module.data_query.framework.knowledge.KnowledgeProperties;
+import cn.iocoder.boot.module.data_query.framework.knowledge.chunk.ChunkSplitter;
 import cn.iocoder.boot.module.data_query.framework.knowledge.recall.KnowledgeChunkHit;
 import cn.iocoder.boot.module.data_query.framework.knowledge.recall.KnowledgeRecallResult;
 import cn.iocoder.boot.module.data_query.framework.knowledge.rerank.KnowledgeRerankProvider;
@@ -63,6 +64,13 @@ public class KnowledgeRecallServiceImpl implements KnowledgeRecallService {
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     private static final int KNOWLEDGE_BASE_STATUS_NORMAL = 0;
+
+    /** context 去重：匹配长度低于此值视为巧合（如通用公文抬头），不去重 */
+    private static final int DEDUPE_MIN_CHARS = 16;
+    /** context 去重：单条最多砍掉 60%，防止把不相邻的相似切片误判为重叠 */
+    private static final double DEDUPE_MAX_RATIO = 0.6;
+    /** 精排只送每片开头的固定 token 预算：中文约 256 字，英文约 1024 字符 */
+    private static final int RERANK_DOC_PREVIEW_TOKENS = 256;
 
     @Resource
     private AiKnowledgeChunkMapper chunkMapper;
@@ -256,7 +264,12 @@ public class KnowledgeRecallServiceImpl implements KnowledgeRecallService {
         }
         long began = System.currentTimeMillis();
         try {
-            List<String> documents = candidates.stream().map(KnowledgeChunkHit::getContent).toList();
+            // 只送每片开头：精排判的是"这段跟问题相关吗"，开头几百字足够；
+            // 整片送进去等于把同一批内容再付一遍输入费。分数仍按候选原序回填，编号不受影响。
+            List<String> documents = candidates.stream()
+                    .map(KnowledgeChunkHit::getContent)
+                    .map(KnowledgeRecallServiceImpl::rerankPreview)
+                    .toList();
             RerankResult rr = rerankProvider.rerank(tenantId, query, documents);
             if (rr == null || rr.getScores() == null || rr.getScores().length != documents.size()) {
                 outcome.skipReason = "rerank 返回分数数量与候选数不符，已按 RRF 原序降级";
@@ -312,12 +325,15 @@ public class KnowledgeRecallServiceImpl implements KnowledgeRecallService {
     private int renumberAndBuild(List<KnowledgeChunkHit> kept, double[] scores,
                                  StringBuilder context, int budget, KnowledgeRecallResult result) {
         int used = 0;
+        KnowledgeChunkHit previous = null;
         for (int i = 0; i < kept.size(); i++) {
             KnowledgeChunkHit hit = kept.get(i);
             int refNo = i + 1;
             hit.setRefNo(refNo);
             hit.setRerankScore(scores == null ? null : scores[i]);
-            String block = buildBlock(refNo, hit);
+            // 去重只作用于"写进 context 的文本"：hit 本身、列表长度与 refNo 一律不动，
+            // 保证 items[i].refNo == i+1，回答里的 [n] 仍能精确映射到同一条切片。
+            String block = buildBlock(refNo, hit, dedupeAgainstPrevious(hit, previous));
             int cost = estimateTokens(block);
             if (i > 0 && used + cost > budget) {
                 result.setTruncated(true);
@@ -325,8 +341,61 @@ public class KnowledgeRecallServiceImpl implements KnowledgeRecallService {
             }
             context.append(block).append("\n\n");
             used += cost;
+            previous = hit;
         }
         return used;
+    }
+
+    /**
+     * 拼接去重：同一文档的相邻切片因 overlap 会在开头重复上一条的结尾。
+     *
+     * <p>只认"当前开头 == 上一条结尾"的精确长匹配（至少 16 字），且最多砍掉当前片的 60%。
+     * 上一条用<b>原始内容</b>比对（重叠是相对原文计算的）；跨文档、跨版本一律不碰。
+     * 返回空时保留原文，避免给模型一个空资料块。
+     */
+    private static String dedupeAgainstPrevious(KnowledgeChunkHit current, KnowledgeChunkHit previous) {
+        String content = safe(current.getContent());
+        if (previous == null || !sameSource(current, previous)) {
+            return content;
+        }
+        String prior = safe(previous.getContent());
+        if (prior.isEmpty() || content.isEmpty()) {
+            return content;
+        }
+        // 先找完整的最长匹配（重叠是相对原文精确计算的），再用 60% 上限兜底：
+        // 若先把上限卡到 60% 再找，遇到超长重叠会退化成"砍半个句子"，留下半截话。
+        int upper = Math.min(prior.length(), content.length());
+        int matched = 0;
+        for (int k = upper; k >= DEDUPE_MIN_CHARS; k--) {
+            if (prior.regionMatches(prior.length() - k, content, 0, k)) {
+                matched = k;
+                break;
+            }
+        }
+        if (matched == 0 || matched > content.length() * DEDUPE_MAX_RATIO) {
+            return content;
+        }
+        String trimmed = content.substring(matched).stripLeading();
+        return trimmed.isEmpty() ? content : trimmed;
+    }
+
+    /** 同文档判定：优先 documentId，缺失时退回 docKey；版本不一致一律不去重 */
+    private static boolean sameSource(KnowledgeChunkHit a, KnowledgeChunkHit b) {
+        if (a.getVersion() != null && b.getVersion() != null
+                && !a.getVersion().equals(b.getVersion())) {
+            return false;
+        }
+        if (a.getDocumentId() != null && b.getDocumentId() != null) {
+            return a.getDocumentId().equals(b.getDocumentId());
+        }
+        String aKey = a.getDocKey();
+        String bKey = b.getDocKey();
+        return StringUtils.hasText(aKey) && aKey.equals(bKey);
+    }
+
+    /** 精排入参截断：按 token 预算取开头，中英文分开计数 */
+    private static String rerankPreview(String content) {
+        return ChunkSplitter.previewByTokenBudget(content, RERANK_DOC_PREVIEW_TOKENS);
     }
 
     /** 一次精排决策的结果载体 */
@@ -454,6 +523,11 @@ public class KnowledgeRecallServiceImpl implements KnowledgeRecallService {
     // ==================== 上下文块 ====================
 
     private static String buildBlock(int refNo, KnowledgeChunkHit hit) {
+        return buildBlock(refNo, hit, safe(hit.getContent()));
+    }
+
+    /** 同 buildBlock，但正文由调用方给定（拼接去重后传入） */
+    private static String buildBlock(int refNo, KnowledgeChunkHit hit, String content) {
         StringBuilder sb = new StringBuilder(256);
         sb.append("【资料 ").append(refNo).append("】");
         if (StringUtils.hasText(hit.getFileName())) {
@@ -472,7 +546,7 @@ public class KnowledgeRecallServiceImpl implements KnowledgeRecallService {
             sb.append(" | ").append(hit.getHeadingPath());
         }
         sb.append('\n');
-        sb.append(safe(hit.getContent()));
+        sb.append(content);
         return sb.toString();
     }
 
@@ -535,9 +609,16 @@ public class KnowledgeRecallServiceImpl implements KnowledgeRecallService {
         return question == null ? "" : WHITESPACE.matcher(question.trim()).replaceAll(" ");
     }
 
-    /** 字符近似 token：中文一字≈1 token，其余 4 字符≈1 token（与问数侧同口径） */
+    /**
+     * 近似 token 数：统一委托切分器的口径（中文一字≈1 token，其余 4 字符≈1 token）。
+     *
+     * <p>原实现用 {@code content.length() / 4} 对中文严重低估 —— 4 个汉字只算 1 token，
+     * 导致 {@code contextTokenBudget=6000} 实际放行约 24000 汉字，硬预算形同虚设：
+     * 一旦调大 topK / chunkSize 就会无声撑爆 prompt。与切分器统一后， budget 才是真闸门。
+     * 当前 topK=4 × chunkSize=500 ≈ 2000 token，正常配置下不会触发裁剪，行为不变。
+     */
     private static int estimateTokens(String content) {
-        return content == null ? 0 : content.length() / 4;
+        return ChunkSplitter.estimateTokens(content);
     }
 
     private static int positive(Integer value, int fallback) {

@@ -400,6 +400,9 @@ data-query:
   knowledge:
     max-file-size-mb: 20
     allowed-file-types: [TXT, MD, PDF, DOC, DOCX]
+    # PDF 由 Spring AI PagePdfDocumentReader（PDFBox 3.x）按页抽文本，带页码溯源；
+    # 扫描件/无文本层的 PDF 会解析失败并落 parse_status=3（提示先 OCR），不静默产出空文档。
+    # DOC（老版 .doc）未实现解析器，虽在白名单内但消费时会明确失败。
     chunk-size: 500          # 单切片 token 上限（字符近似口径，中文1字≈1token）
     chunk-overlap-ratio: 0.2 # 相邻切片重叠占 chunk-size 的比例（500×0.2=100 token），段内段间都保留
     # 切分策略：结构块优先成段，超长段按 段落\n\n>换行\n>句末>逗号>空格>字符 递归降级切分，
@@ -417,7 +420,7 @@ data-query:
     # ===== P9.2：知识库问答（混合召回 + 运行时）=====
     # 安全边界不可通过配置关闭：租户私有表、base_id 归属校验、context/history 只由服务端注入、
     # 引用编号越界即删除；下面只调相关性与运行参数。
-    top-k: 6                        # 进入上下文的切片数（裁剪后上限）
+    top-k: 4                        # 进入上下文的切片数（裁剪后上限）；4 片 × 500 token ≈ 2000，留足回答空间
     vector-candidates: 20           # 向量路候选数（B-tree 预过滤后进入 RRF）
     keyword-candidates: 20          # 关键词路候选数
     max-keywords: 6                 # 问题关键词提取上限，控制 ILIKE 分支数
@@ -428,8 +431,8 @@ data-query:
     keyword-fallback-enabled: true  # 置 false 时向量不可用直接返回空召回（排障用），绝不借别租户模型
     max-question-length: 500
     max-answer-chars: 8000          # 回答落库字符上限，防止超长回答撑爆消息表
-    history-max-messages: 6         # 拼 history 最多取几条消息（6 = 3 轮）
-    history-token-budget: 1500      # history Token 预算，超出从最旧的一条开始丢
+    history-max-messages: 4         # 拼 history 最多取几条消息（4 = 2 轮）
+    history-token-budget: 800       # history Token 预算（中文一字≈1 token），超出从最旧的一条开始丢
     model-timeout-ms: 60000         # RAG 回答较长，比治理层默认 8s 放宽
     prompt-injection-guard-enabled: true
     # ===== P9.3：知识库 SSE 流式问答（与智能问数 chat.sse-* 解耦）=====

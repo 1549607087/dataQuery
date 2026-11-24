@@ -141,6 +141,13 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-markdown-document-reader</artifactId>
         </dependency>
+        <!-- PDF 解析用 Spring AI 官方 PagePdfDocumentReader（底层 PDFBox 3.0.7）按页抽文本，
+             由 PdfDocumentParser 适配成 ParsedDocument；切分仍走自研 ChunkSplitter。
+             版本由 Spring AI BOM 2.0.1 统一管理，无需写 version。 -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-pdf-document-reader</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>

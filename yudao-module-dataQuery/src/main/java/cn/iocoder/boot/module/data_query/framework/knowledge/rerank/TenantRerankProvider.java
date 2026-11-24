@@ -137,7 +137,7 @@ public class TenantRerankProvider implements KnowledgeRerankProvider {
             throw exception(TENANT_CONTEXT_MISSING);
         }
         Resolved resolved = resolve(tenantId, true);
-        String effectiveProtocol = protocolName(resolved.provider);
+        String effectiveProtocol = protocolName(resolved.config, resolved.provider);
         String path = resolvePath(effectiveProtocol);
 
         // 显式租户号拼限流键，不依赖 ThreadLocal
@@ -251,10 +251,11 @@ public class TenantRerankProvider implements KnowledgeRerankProvider {
         }
         AiModelProvider provider = providers.get(0);
 
-        String effectiveProtocol = protocolName(provider);
+        // 协议已下沉到模型配置：Rerank 支持 DASHSCOPE / COHERE 两种请求格式
+        String effectiveProtocol = protocolName(config, provider);
         if (!PROTOCOL_DASHSCOPE.equals(effectiveProtocol) && !PROTOCOL_COHERE.equals(effectiveProtocol)) {
             return absent(strict, KNOWLEDGE_RERANK_PROTOCOL_UNSUPPORTED,
-                    "tenantId=" + tenantId + " 的 Rerank 协议 " + effectiveProtocol + " 暂不支持");
+                    "tenantId=" + tenantId + " 的 Rerank 模型协议 " + effectiveProtocol + " 暂不支持");
         }
         if (!StringUtils.hasText(provider.getApiKey()) || !StringUtils.hasText(provider.getBaseUrl())
                 || !StringUtils.hasText(config.getModelId())) {
@@ -276,10 +277,18 @@ public class TenantRerankProvider implements KnowledgeRerankProvider {
         return null;
     }
 
-    /** 供应商协议优先，未配置则回退全局配置 */
-    private String protocolName(AiModelProvider provider) {
-        String value = StringUtils.hasText(provider.getProtocol())
-                ? provider.getProtocol().trim().toUpperCase(Locale.ROOT) : protocol;
+    /**
+     * 模型协议优先（协议已下沉到模型配置层），存量数据回退供应商协议，
+     * 最后回退全局配置 {@code data-query.knowledge.rerank.protocol}
+     */
+    private String protocolName(AiModelConfig config, AiModelProvider provider) {
+        String value = config != null ? config.getProtocol() : null;
+        if (!StringUtils.hasText(value) && provider != null) {
+            value = provider.getProtocol();
+        }
+        if (!StringUtils.hasText(value)) {
+            value = protocol;
+        }
         return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
     }
 
@@ -372,23 +381,41 @@ public class TenantRerankProvider implements KnowledgeRerankProvider {
                     tenantId, resolved.modelCode);
         }
         return clients.computeIfAbsent(cacheKey,
-                key -> buildClient(resolved.provider, timeoutMs));
+                key -> buildClient(resolved.provider, effectiveProtocol, timeoutMs));
     }
 
-    private RestClient buildClient(AiModelProvider provider, int timeoutMs) {
+    private RestClient buildClient(AiModelProvider provider, String effectiveProtocol, int timeoutMs) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(connectTimeoutMs);
         factory.setReadTimeout(timeoutMs);
-        String base = provider.getBaseUrl().trim();
-        while (base.endsWith("/")) {
-            base = base.substring(0, base.length() - 1);
-        }
+        String base = normalizeBaseUrl(provider.getBaseUrl(), effectiveProtocol);
         RestClient.Builder builder = RestClient.builder()
                 .baseUrl(base)
                 .defaultHeader("Authorization", "Bearer " + provider.getApiKey())
                 .requestFactory(factory);
         customHeaders(provider.getHeaders()).forEach(builder::defaultHeader);
         return builder.build();
+    }
+
+    /**
+     * base_url 归一化：Cohere 兼容协议统一由代码拼 {@code /v1/rerank}，
+     * base_url 已带 {@code /v1}（如硅基流动 {@code https://api.siliconflow.cn/v1}）时必须剥掉，
+     * 否则会拼成 {@code /v1/v1/rerank} 触发 404。DASHSCOPE 专用路径保持原样。
+     */
+    private static String normalizeBaseUrl(String baseUrl, String effectiveProtocol) {
+        String value = baseUrl == null ? "" : baseUrl.trim();
+        while (value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        if (!PROTOCOL_COHERE.equals(effectiveProtocol)) {
+            return value;
+        }
+        if (value.endsWith(DEFAULT_PATH_COHERE)) {
+            value = value.substring(0, value.length() - DEFAULT_PATH_COHERE.length());
+        } else if (value.endsWith("/v1")) {
+            value = value.substring(0, value.length() - 3);
+        }
+        return value;
     }
 
     private static Map<String, String> customHeaders(String raw) {

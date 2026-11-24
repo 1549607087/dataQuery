@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HexFormat;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -256,11 +257,11 @@ public class TenantSchemaEmbeddingProvider implements SchemaEmbeddingProvider {
         }
         AiModelProvider provider = providers.get(0);
 
-        String protocol = StringUtils.hasText(provider.getProtocol())
-                ? provider.getProtocol().trim().toUpperCase() : PROTOCOL_OPENAI;
+        // 协议已下沉到模型配置：Embedding 只支持 OpenAI 兼容格式
+        String protocol = resolveProtocol(config, provider, PROTOCOL_OPENAI);
         if (!PROTOCOL_OPENAI.equals(protocol)) {
             return absent(strict, SCHEMA_EMBEDDING_PROTOCOL_UNSUPPORTED,
-                    "tenantId=" + tenantId + " 的供应商协议 " + protocol + " 暂不支持，P2 仅支持 OPENAI 兼容协议");
+                    "tenantId=" + tenantId + " 的模型协议 " + protocol + " 暂不支持，Embedding 仅支持 OPENAI 兼容协议");
         }
         if (!StringUtils.hasText(provider.getApiKey())
                 || !StringUtils.hasText(provider.getBaseUrl())
@@ -281,6 +282,18 @@ public class TenantSchemaEmbeddingProvider implements SchemaEmbeddingProvider {
             throw exception(code);
         }
         return null;
+    }
+
+    /** 模型协议优先（协议已下沉到模型配置层），存量数据回退供应商，最后用调用方默认值 */
+    private String resolveProtocol(AiModelConfig config, AiModelProvider provider, String fallback) {
+        String value = config != null ? config.getProtocol() : null;
+        if (!StringUtils.hasText(value) && provider != null) {
+            value = provider.getProtocol();
+        }
+        if (!StringUtils.hasText(value)) {
+            return fallback;
+        }
+        return value.trim().toUpperCase(Locale.ROOT);
     }
 
     // ==================== 客户端构造与缓存 ====================

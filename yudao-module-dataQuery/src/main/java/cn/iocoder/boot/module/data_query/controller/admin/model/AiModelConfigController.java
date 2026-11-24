@@ -37,6 +37,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 
 import static cn.iocoder.yudao.framework.apilog.core.enums.OperateTypeEnum.EXPORT;
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
@@ -61,6 +62,7 @@ public class AiModelConfigController {
     @PreAuthorize("@ss.hasPermission('data-query:ai-model-config:create')")
     public CommonResult<Long> createAiModelConfig(@Valid @RequestBody AiModelConfigSaveReqVO createReqVO) {
         AiModelConfig config = BeanUtils.toBean(createReqVO, AiModelConfig.class);
+        normalizeProtocol(config);
         fillCreateFields(config);
         aiModelConfigService.save(config);
         return success(config.getId());
@@ -71,6 +73,7 @@ public class AiModelConfigController {
     @PreAuthorize("@ss.hasPermission('data-query:ai-model-config:update')")
     public CommonResult<Boolean> updateAiModelConfig(@Valid @RequestBody AiModelConfigSaveReqVO updateReqVO) {
         AiModelConfig updateObj = BeanUtils.toBean(updateReqVO, AiModelConfig.class);
+        normalizeProtocol(updateObj);
         aiModelConfigService.updateById(updateObj);
         return success(true);
     }
@@ -179,6 +182,30 @@ public class AiModelConfigController {
         entity.setCreateTime(now);
         entity.setUpdateTime(now);
         entity.setDeleted(0);
+    }
+
+    /**
+     * 协议兜底与纠正：协议已下沉到模型配置层
+     * <ul>
+     *   <li>Rerank（type=3）：仅接受 DASHSCOPE / COHERE，留空或非法值按 COHERE（/v1/rerank 兼容格式）</li>
+     *   <li>Chat / Embedding / SQL 专用：固定 OPENAI 兼容格式</li>
+     * </ul>
+     */
+    private void normalizeProtocol(AiModelConfig entity) {
+        Integer modelType = entity.getModelType();
+        if (modelType == null) {
+            return;
+        }
+        String protocol = entity.getProtocol() == null ? ""
+                : entity.getProtocol().trim().toUpperCase(Locale.ROOT);
+        if (modelType == 3) {
+            if (!"DASHSCOPE".equals(protocol) && !"COHERE".equals(protocol)) {
+                protocol = "COHERE";
+            }
+        } else {
+            protocol = "OPENAI";
+        }
+        entity.setProtocol(protocol);
     }
 
 }
