@@ -1,15 +1,19 @@
 package cn.iocoder.boot.module.data_query.controller.admin.datasource.vo.relation;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
+
+import java.util.List;
 
 /**
  * 管理后台 - 表关系 / Join 路径新增/修改 Request VO
  *
  * 同步 / 检测 / 健康状态等运行时字段由服务端回写，不接受前端提交；
  * 左右表物理名由服务端按 leftTableId/rightTableId 查询元数据回填，前端只传表编号；
+ * 关联字段对以结构化列表提交，由服务端序列化为 join_pairs JSON（前端不再拼 JSON 字符串）；
  * tenant_id 一律由服务端按当前租户上下文写入，禁止前端传入。
  */
 @Schema(description = "管理后台 - 表关系 / Join 路径新增/修改 Request VO")
@@ -34,8 +38,10 @@ public class AiDatasourceTableRelationSaveReqVO {
     @Schema(description = "连接类型：1 INNER、2 LEFT、3 RIGHT、4 FULL、5 CROSS", example = "")
     private Integer joinType;
 
-    @Schema(description = "关联字段对 JSON 数组，如 [{\\\"left\\\":\\\"customer_id\\\",\\\"right\\\":\\\"id\\\"}]", example = "")
-    private String joinPairs;
+    @Schema(description = "关联字段对列表，服务端负责拼成 JSON 入库", example = "[{\"left\":\"customer_id\",\"right\":\"id\"}]")
+    @Valid
+    @Size(max = 64, message = "字段对最多 64 组")
+    private List<AiDatasourceTableRelationJoinPairVO> joinPairs;
 
     @Schema(description = "额外 ON 条件表达式，必须经静态校验，禁止子查询与函数注入", example = "")
     private String joinCondition;

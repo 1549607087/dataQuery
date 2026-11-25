@@ -19,13 +19,14 @@ import org.springframework.web.bind.annotation.RestController;
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 
 /**
- * 管理后台 - 租户 AI 配置初始化（兜底 / 存量补刷）
+ * 管理后台 - 租户 AI 配置状态（原「租户 AI 配置初始化」）
  *
- * 正常路径：新建租户时 system 发布 TenantCreatedEvent，AiTenantInitListener 自动初始化。
- * 本接口用于：存量租户补刷、自动初始化失败后的手动重试。
+ * <p>2026-11-26 起 tenant_id = 0 的平台模板已整体移除，租户的供应商、模型配置与
+ * 场景绑定由租户管理员在管理端自行创建，不再自动复制模板。{@code /init} 保留为
+ * 兼容旧调用的空操作；{@code /status} 用于查看租户当前是否已自行配齐三类配置。
  *
- * 权限边界：该接口只创建「密钥为空的配置骨架」，不读取也不返回任何租户的凭证或业务数据，
- * 因此允许平台运维跨租户补刷。菜单 data-query:tenant-init:create / :query 应按套餐
+ * 权限边界：本接口不读取也不返回任何租户的凭证或业务数据，
+ * 因此允许平台运维跨租户查询。菜单 data-query:tenant-init:create / :query 应按套餐
  * 只分配给平台管理员，不要下放给普通租户管理员（见 docs/tenant-isolation-design.md 第 7、11 章）。
  */
 @Tag(name = "管理后台 - 租户 AI 配置初始化")
@@ -38,7 +39,7 @@ public class AiTenantInitController {
     private AiTenantInitializer aiTenantInitializer;
 
     @PostMapping("/init")
-    @Operation(summary = "初始化指定租户的 AI 模型配置（幂等）")
+    @Operation(summary = "兼容旧调用的空操作：平台模板已移除，不再自动初始化租户模型配置")
     @Parameter(name = "tenantId", description = "租户编号；不传则取当前租户", required = false)
     @PreAuthorize("@ss.hasPermission('data-query:tenant-init:create')")
     public CommonResult<Boolean> init(@RequestParam(value = "tenantId", required = false) Long tenantId) {
@@ -47,7 +48,7 @@ public class AiTenantInitController {
     }
 
     @GetMapping("/status")
-    @Operation(summary = "查询指定租户的 AI 配置初始化状态")
+    @Operation(summary = "查询指定租户的 AI 配置状态（是否已自行配齐三类配置）")
     @Parameter(name = "tenantId", description = "租户编号；不传则取当前租户", required = false)
     @PreAuthorize("@ss.hasPermission('data-query:tenant-init:query')")
     public CommonResult<AiTenantInitStatusRespVO> status(

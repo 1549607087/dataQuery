@@ -7,13 +7,16 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 /**
- * 监听租户创建，自动初始化该租户的 AI 模型配置骨架。
+ * 监听租户创建（原「自动初始化 AI 配置骨架」）。
+ *
+ * <p>2026-11-26 起平台模板已移除，监听器调用的是空操作，不再为新租户写入任何配置；
+ * 租户管理员需自行在管理端创建供应商、模型配置与场景绑定。监听器保留是为了维持
+ * 租户创建事件链路不变，便于将来若改为其它初始化策略时直接接上。
  *
  * 依赖方向：事件类在 yudao-common，system 只负责发布，dataQuery 负责订阅，
  * system 不需要反向依赖 dataQuery。
  *
- * 兜底：初始化失败必须在这里吞掉异常，不能阻断租户创建主流程；
- * 运维可通过 POST /admin-api/data-query/tenant-init/init?tenantId=xxx 手动补刷。
+ * 兜底：任何异常必须在这里吞掉，不能阻断租户创建主流程。
  */
 @Slf4j
 @Component

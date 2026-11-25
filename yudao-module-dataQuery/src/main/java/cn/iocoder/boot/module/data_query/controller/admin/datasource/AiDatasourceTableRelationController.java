@@ -14,6 +14,8 @@ import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 import cn.iocoder.yudao.framework.mybatis.core.util.MyBatisUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -49,6 +51,8 @@ import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 @Validated
 public class AiDatasourceTableRelationController {
 
+    private static final ObjectMapper JSON = new ObjectMapper();
+
     @Resource
     private AiDatasourceTableRelationService aiDatasourceTableRelationService;
 
@@ -56,15 +60,31 @@ public class AiDatasourceTableRelationController {
     @Operation(summary = "创建表关系 / Join 路径")
     @PreAuthorize("@ss.hasPermission('data-query:ai-datasource-table-relation:create')")
     public CommonResult<Long> createAiDatasourceTableRelation(@Valid @RequestBody AiDatasourceTableRelationSaveReqVO reqVO) {
-        return success(aiDatasourceTableRelationService.createAiDatasourceTableRelation(BeanUtils.toBean(reqVO, AiDatasourceTableRelation.class)));
+        return success(aiDatasourceTableRelationService.createAiDatasourceTableRelation(buildEntity(reqVO)));
     }
 
     @PutMapping("/update")
     @Operation(summary = "更新表关系 / Join 路径")
     @PreAuthorize("@ss.hasPermission('data-query:ai-datasource-table-relation:update')")
     public CommonResult<Boolean> updateAiDatasourceTableRelation(@Valid @RequestBody AiDatasourceTableRelationSaveReqVO reqVO) {
-        aiDatasourceTableRelationService.updateAiDatasourceTableRelation(BeanUtils.toBean(reqVO, AiDatasourceTableRelation.class));
+        aiDatasourceTableRelationService.updateAiDatasourceTableRelation(buildEntity(reqVO));
         return success(true);
+    }
+
+    /**
+     * 前端传结构化的字段对列表，服务端拼成 join_pairs JSON 后入库。
+     * 库里的 JSON 格式保持不变，召回侧解析逻辑无需改动。
+     */
+    private AiDatasourceTableRelation buildEntity(AiDatasourceTableRelationSaveReqVO reqVO) {
+        final String joinPairsJson;
+        try {
+            joinPairsJson = JSON.writeValueAsString(
+                    reqVO.getJoinPairs() == null ? List.of() : reqVO.getJoinPairs());
+        } catch (JsonProcessingException ex) {
+            throw new IllegalArgumentException("连接字段对序列化失败", ex);
+        }
+        return BeanUtils.toBean(reqVO, AiDatasourceTableRelation.class,
+                entity -> entity.setJoinPairs(joinPairsJson));
     }
 
     @DeleteMapping("/delete")
