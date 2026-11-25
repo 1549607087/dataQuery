@@ -1,9 +1,11 @@
 package cn.iocoder.boot.module.data_query.service.impl;
 
+import cn.iocoder.boot.module.data_query.entity.AiDatasourceTable;
 import cn.iocoder.boot.module.data_query.entity.AiDatasourceTableRelation;
 import cn.iocoder.boot.module.data_query.framework.datasource.AiDatasourceOwnerValidator;
 import cn.iocoder.boot.module.data_query.mapper.AiDatasourceTableRelationMapper;
 import cn.iocoder.boot.module.data_query.service.AiDatasourceTableRelationService;
+import cn.iocoder.boot.module.data_query.service.AiDatasourceTableService;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
@@ -21,6 +23,7 @@ import java.util.Objects;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.DATASOURCE_OWNERSHIP_MISMATCH;
+import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.DATASOURCE_TABLE_NOT_EXISTS;
 import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.DATASOURCE_TABLE_RELATION_NOT_EXISTS;
 import static cn.iocoder.boot.module.data_query.enums.DataSourceErrorCodeConstants.TENANT_CONTEXT_MISSING;
 
@@ -33,6 +36,9 @@ public class AiDatasourceTableRelationServiceImpl extends ServiceImpl<AiDatasour
 
     @Resource
     private AiDatasourceOwnerValidator ownerValidator;
+
+    @Resource
+    private AiDatasourceTableService aiDatasourceTableService;
 
     @Override
     public AiDatasourceTableRelation getAiDatasourceTableRelation(Long id) {
@@ -50,6 +56,8 @@ public class AiDatasourceTableRelationServiceImpl extends ServiceImpl<AiDatasour
     public Long createAiDatasourceTableRelation(AiDatasourceTableRelation entity) {
         Assert.notNull(entity, "entity 不能为空");
         ownerValidator.requireOwned(entity.getDatasourceId());
+        // 表物理名一律服务端按 leftTableId/rightTableId 解析，不接受前端传入
+        resolveAndFillTableNames(entity);
         fillCreateFields(entity);
         save(entity);
         return entity.getId();
@@ -65,6 +73,9 @@ public class AiDatasourceTableRelationServiceImpl extends ServiceImpl<AiDatasour
             throw exception(DATASOURCE_OWNERSHIP_MISMATCH);
         }
         ownerValidator.requireOwned(targetDatasourceId);
+        entity.setDatasourceId(targetDatasourceId);
+        // 表物理名一律服务端按 leftTableId/rightTableId 解析，不接受前端传入
+        resolveAndFillTableNames(entity);
         fillUpdateFields(entity);
         updateById(entity);
     }
@@ -138,6 +149,31 @@ public class AiDatasourceTableRelationServiceImpl extends ServiceImpl<AiDatasour
             throw exception(DATASOURCE_TABLE_RELATION_NOT_EXISTS);
         }
         return exists;
+    }
+
+    /**
+     * 按 leftTableId/rightTableId 从元数据反查物理名并覆盖实体字段。
+     *
+     * <p>前端只负责选表（ID），不负责写物理名；getAiDatasourceTable 已按当前租户 +
+     * deleted=0 过滤，这里再校验两张表必须属于同一数据源，避免关系跨数据源。
+     */
+    private void resolveAndFillTableNames(AiDatasourceTableRelation entity) {
+        AiDatasourceTable left = requireTable(entity.getLeftTableId());
+        AiDatasourceTable right = requireTable(entity.getRightTableId());
+        if (!Objects.equals(left.getDatasourceId(), entity.getDatasourceId())
+                || !Objects.equals(right.getDatasourceId(), entity.getDatasourceId())) {
+            throw exception(DATASOURCE_OWNERSHIP_MISMATCH);
+        }
+        entity.setLeftTableName(left.getTableName());
+        entity.setRightTableName(right.getTableName());
+    }
+
+    private AiDatasourceTable requireTable(Long tableId) {
+        AiDatasourceTable table = aiDatasourceTableService.getAiDatasourceTable(tableId);
+        if (table == null) {
+            throw exception(DATASOURCE_TABLE_NOT_EXISTS);
+        }
+        return table;
     }
 
     /** 实体是普通 POJO，框架不会自动填充；数据源侧全租户私有，必须显式写 tenant_id */

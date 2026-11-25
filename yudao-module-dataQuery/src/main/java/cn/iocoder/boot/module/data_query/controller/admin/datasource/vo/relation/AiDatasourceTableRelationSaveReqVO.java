@@ -9,6 +9,7 @@ import lombok.Data;
  * 管理后台 - 表关系 / Join 路径新增/修改 Request VO
  *
  * 同步 / 检测 / 健康状态等运行时字段由服务端回写，不接受前端提交；
+ * 左右表物理名由服务端按 leftTableId/rightTableId 查询元数据回填，前端只传表编号；
  * tenant_id 一律由服务端按当前租户上下文写入，禁止前端传入。
  */
 @Schema(description = "管理后台 - 表关系 / Join 路径新增/修改 Request VO")
@@ -29,12 +30,6 @@ public class AiDatasourceTableRelationSaveReqVO {
     @Schema(description = "右表，关联 ai_datasource_table.id", example = "")
     @NotNull(message = "RightTableId不能为空")
     private Long rightTableId;
-
-    @Schema(description = "左表物理名，冗余便于生成 SQL", example = "")
-    private String leftTableName;
-
-    @Schema(description = "右表物理名，冗余便于生成 SQL", example = "")
-    private String rightTableName;
 
     @Schema(description = "连接类型：1 INNER、2 LEFT、3 RIGHT、4 FULL、5 CROSS", example = "")
     private Integer joinType;

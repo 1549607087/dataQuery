@@ -17,6 +17,8 @@ import cn.iocoder.boot.module.data_query.service.AiDatasourceTableRelationServic
 import cn.iocoder.boot.module.data_query.service.AiDatasourceTableService;
 import cn.iocoder.boot.module.data_query.service.SchemaRecallService;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -67,6 +69,9 @@ public class SchemaRecallServiceImpl implements SchemaRecallService {
     private static final Pattern ASCII_WORD = Pattern.compile("[a-zA-Z][a-zA-Z0-9_]{1,}");
     private static final Pattern ILIKE_UNSAFE = Pattern.compile("[%_\\\\'\"\\s]+");
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
+    /** 渲染 Join 时用于校验表/标识符，防止配置里的字面量被拼进提示词 */
+    private static final Pattern SQL_IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_$]*");
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     /** 表角色：1 事实表（见 nl2sql-datasource.sql 的 COMMENT） */
     private static final int TABLE_ROLE_FACT = 1;
@@ -673,11 +678,7 @@ public class SchemaRecallServiceImpl implements SchemaRecallService {
         if (!ctx.getJoins().isEmpty()) {
             sb.append("\n-- 已验证 Join 路径（左右表均在上述集合内）\n");
             for (SchemaContext.JoinItem j : ctx.getJoins()) {
-                sb.append("JOIN ").append(safe(j.getLeftTableName()))
-                        .append(" <-> ").append(safe(j.getRightTableName()))
-                        .append(" | type=").append(j.getJoinType() == null ? 0 : j.getJoinType())
-                        .append(" | pairs=").append(singleLine(safe(j.getJoinPairs())))
-                        .append('\n');
+                sb.append(renderJoinClause(j)).append('\n');
             }
         }
         if (truncated) {
@@ -842,6 +843,76 @@ public class SchemaRecallServiceImpl implements SchemaRecallService {
 
     private static String qualified(String schema, String table) {
         return hasText(schema) ? safe(schema) + "." + safe(table) : safe(table);
+    }
+
+    /**
+     * 把已验证 Join 路径渲染成可直接照抄的 SQL 片段。
+     *
+     * <p>旧格式 `JOIN a <-> b | type=2 | pairs=[...]` 里的 type 是裸数字，LLM 看不到
+     * 1=INNER / 2=LEFT 的字典，实际会忽略它自行决定 JOIN 类型。改为输出完整 SQL 片段，
+     * 模型照抄即可，无需在提示词里解释数字含义。
+     *
+     * <p>join_pairs 来自后台配置，属于不可信字面量：只接受简单标识符，非法项直接丢弃，
+     * 绝不把原始字符串拼进提示词。
+     */
+    private static String renderJoinClause(SchemaContext.JoinItem j) {
+        String left = safe(j.getLeftTableName()).trim();
+        String right = safe(j.getRightTableName()).trim();
+        if (!SQL_IDENTIFIER.matcher(left).matches() || !SQL_IDENTIFIER.matcher(right).matches()) {
+            // 元数据异常：宁可不渲染，也不把不可信字面量变成「看起来像 SQL」的提示词
+            return "-- JOIN skipped: invalid table name";
+        }
+        String keyword = joinTypeKeyword(j.getJoinType());
+        StringBuilder sb = new StringBuilder(left).append(' ').append(keyword).append(' ').append(right);
+        // CROSS JOIN 语法上不带 ON；其余类型只在解析出合法字段对时追加 ON
+        if (!"CROSS JOIN".equals(keyword)) {
+            String on = joinOnClause(j.getJoinPairs(), left, right);
+            if (hasText(on)) {
+                sb.append(" ON ").append(on);
+            }
+        }
+        return sb.toString();
+    }
+
+    /** JOIN 类型数字 → SQL 关键字；未知值退回普通 JOIN，不再向 LLM 输出裸数字 */
+    private static String joinTypeKeyword(Integer joinType) {
+        if (joinType == null) {
+            return "JOIN";
+        }
+        return switch (joinType) {
+            case 1 -> "INNER JOIN";
+            case 2 -> "LEFT JOIN";
+            case 3 -> "RIGHT JOIN";
+            case 4 -> "FULL JOIN";
+            case 5 -> "CROSS JOIN";
+            default -> "JOIN";
+        };
+    }
+
+    /** 解析 [{"left":"customer_id","right":"id"}]，拼成 a.customer_id = b.id AND ... */
+    private static String joinOnClause(String joinPairs, String leftTable, String rightTable) {
+        if (!hasText(joinPairs)) {
+            return "";
+        }
+        try {
+            JsonNode array = JSON.readTree(joinPairs);
+            if (array == null || !array.isArray()) {
+                return "";
+            }
+            List<String> conditions = new ArrayList<>();
+            for (JsonNode item : array) {
+                String l = item.path("left").asText("");
+                String r = item.path("right").asText("");
+                if (!SQL_IDENTIFIER.matcher(l).matches() || !SQL_IDENTIFIER.matcher(r).matches()) {
+                    continue;
+                }
+                conditions.add(leftTable + '.' + l + " = " + rightTable + '.' + r);
+            }
+            return String.join(" AND ", conditions);
+        } catch (Exception ex) {
+            // 非法 JSON 静默跳过：JOIN 行仍可读，但不带任何 ON 条件
+            return "";
+        }
     }
 
     private static int estimateTokens(String content) {

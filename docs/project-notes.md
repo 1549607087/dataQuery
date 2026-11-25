@@ -3,7 +3,7 @@
 > 本文件是从 `AGENTS.md` 拆出的**参考资料**部分：技术栈、目录结构、运行配置、测试清单、待确认事项。
 > `AGENTS.md` 只保留「必须遵守的规则」，不预加载本文件——需要具体事实时再查。
 >
-> 内容基于对仓库的静态分析（更新于 2026-11-22）。未验证的信息一律标注「待补充 / 待确认」，请勿臆造；
+> 内容基于对仓库的静态分析 + 后续变更同步（初始 2026-11-22，最近更新 2026-11-24）。未验证的信息一律标注「待补充 / 待确认」，请勿臆造；
 > 若发现与代码不一致，**以代码为准**并回来更新本文件。
 
 ---
@@ -29,6 +29,7 @@
 | `docs/knowledge-doc-versioning-design.md` | 文档版本管理设计 |
 | `docs/tenant-isolation-design.md` | 多租户凭证隔离方案（已评审落地） |
 | `docs/deepseek-web-chat-design.md` | DeepSeek Web 会话相关设计 |
+| `docs/knowledge-token-optimization-changes.md` | 知识库问答省 token 变更说明（①②③④⑤，含回退方式与验证结果） |
 
 ---
 
@@ -45,7 +46,7 @@
 | 向量 | pgvector `vector(1536)` + HNSW，自建 DAO（`PgVectorTypeHandler`），**不引入任何 Spring AI VectorStore Bean** | 设计文档、`application.yaml` 注释 |
 | Embedding / Chat | 每租户独立账号，经 `TenantOpenAiChatModelClient` / `TenantSchemaEmbeddingProvider` 动态构造 | 设计文档 |
 | 消息队列 | 知识库入库用原生 `rocketmq-client-java 5.2.0`（gRPC SDK，Proxy 模式）；框架其它模块用 `rocketmq-spring-boot-starter`（Remoting），两者可共存 | `yudao-dependencies/pom.xml`、`knowledge-rag-flow.md` |
-| 文档解析 | Apache POI `poi-ooxml 5.2.5`（DOCX）；**PDF 解析依赖当前未声明**（设计含 PDF，见 §6 第 7 条） | `yudao-module-dataQuery/pom.xml` |
+| 文档解析 | Apache POI `poi-ooxml 5.2.5`（DOCX）；PDF 用 Spring AI 官方 `spring-ai-pdf-document-reader`（底层 PDFBox 3.0.7，`PdfDocumentParser` 适配）；MD 用官方 `MarkdownDocumentReader`（`SpringAiMarkdownParser` 适配） | `yudao-module-dataQuery/pom.xml:144`、`parser/` 目录 |
 | 其他 | Lombok、MapStruct、Flowable 8.0.0、Quartz、Springdoc/Knife4j、JUnit 5 + Mockito + AssertJ | README、pom |
 
 ---
@@ -122,7 +123,9 @@ mvn -DskipTests package
 - `data-query.chat.*`：问数编排、SSE、超时；`enabled=false` 时回退 `EchoModelClient`（联调/故障降级）。
 - `data-query.knowledge.*`：知识库问答与 MQ 异步摄取；`mq.enabled=false` 走同步兜底（无 MQ 本地调试用）。
   - 注意：`knowledge.mq.endpoints` 当前为 `127.0.0.1:8080`，而设计文档写 Proxy 端口 `8081`（**存在不一致，见 §6**）。
-- `data-query.knowledge.table-narrate.*`：表格 LLM 叙述开关（默认关闭）、模型场景 `TABLE_NARRATE`、分批行数、桥接重叠比例。
+  - 检索现值（2026-11-24 省 token 调整）：`top-k=4`、`context-token-budget=6000`、`history-max-messages=4`（2 轮）、`history-token-budget=800`；token 估算统一按中文 1 字≈1 token。
+  - 拼接去重（≥16 字且 ≤60%）与精排截断（每片开头 256 字）已代码固化、**无配置开关**；详见 `docs/knowledge-token-optimization-changes.md`。
+- `data-query.knowledge.table-narrate.*`：表格 LLM 叙述**已固化启用**（无 enabled 开关）、模型场景 `TABLE_NARRATE`、分批行数、桥接重叠比例 0.2。
 - `data-query.cancel.*`：前端「停止回答」联动取消（`enabled` 默认 true、`token-ttl-ms`）。
 - 多租户：`yudao.tenant.enable=true`；`ignore-tables` **仅**登记提示词 4 表。数据源、元数据、向量等 `ai_*` 表一律租户私有，
   **严禁**加入 `ignore-tables`。
@@ -131,20 +134,22 @@ mvn -DskipTests package
 
 ## 5. 测试类清单
 
-`yudao-module-dataQuery/src/test` 下现有 **30 个**测试类（2026-11-22 核对）：
+`yudao-module-dataQuery/src/test` 下**当前实际存在 10 个**测试类（2026-11-25 核对，与磁盘逐文件确认）：
 
-| 分组 | 测试类 |
-|---|---|
-| 知识库 Controller / Service | `AiKnowledgeBaseControllerTest`、`AiKnowledgeDocumentControllerTest`、`AiKnowledgeDocumentServiceTest` |
-| 解析与切块 | `TxtMarkdownParserTest`、`SpringAiMarkdownParserTest`、`PdfDocumentParserTest`、`ChunkSplitterTest`、`DocumentTextRewriterTest`、`TableNarrateServiceTest` |
-| 摄取 | `KnowledgeIngestServiceTest`、`KnowledgeMessageTreeWriterTest` |
-| 版本管理 | `KnowledgeDocumentVersionServiceTest`、`KnowledgeVersionCommitServiceTest`、`KnowledgeVersionUtilTest` |
-| 召回 | `KnowledgeRecallServiceImplTest`、`TenantRerankProviderTest` |
-| SQL 渲染校验 | `AiSchemaVectorMapperSqlTest`、`AiKnowledgeChunkMapperSqlParseTest` |
-| 问数编排 | `UnifiedChatServiceImplTest`、`UnifiedChatVOTest`、`CitationValidatorTest` |
-| 流式与取消 | `ChatCancelTokenTest`、`ChatCancelRegistryTest`、`ChatSseExecutorTest`、`ChatStreamConnectionTest`、`StreamChunkParserTest`、`StreamingCitationGateTest` |
-| 模型治理 | `ModelGovernanceExecutorCancelTest`、`ModelGovernanceExecutorStreamTest` |
-| 知识库问答 | `KnowledgeChatOrchestratorTest`、`KnowledgeConversationServiceImplTest` |
+| 分组 | 测试类 | 用例数 |
+|---|---|---|
+| 知识库召回与 token | `KnowledgeRecallTokenBudgetTest`、`KnowledgeRecallDedupeTest` | 5 + 13 |
+| 知识库问答策略 | `PromotionPolicyTest` | 6 |
+| 流式与在途去重 | `ChatInflightGuardTest`、`StreamAbortSignalGovernanceTest` | 4 + 2 |
+| Schema 召回与向量同步 | `SchemaRecallKeywordExtractTest`、`SchemaRecallJoinRenderTest`、`SchemaVectorIndexSyncServiceImplTest` | 6 + 5 + 9 |
+| 表关系配置 | `AiDatasourceTableRelationServiceImplTest` | 4 |
+| PDF 解析 | `PdfDocumentParserTest` | 8 |
+
+全模块测试：**Tests run: 62, Failures: 0, Errors: 0**（`mvn -pl yudao-module-dataQuery -am test`，2026-11-25）。
+
+> **重要**：2026-11-22 版曾记录 30 个测试类（含 Controller、切块、摄取、版本管理、问数编排、知识库问答等），
+> 但这些源文件**当前不在磁盘、也不在 git 中**，无法恢复。上述 30 个清单已作废，勿再按它判断回归覆盖度。
+> 若需补齐这些测试，须按当前代码重新编写。
 
 测试栈：JUnit 5 + AssertJ（`assertThat`）+ Spring Boot Starter Test；用 `@DisplayName` 描述用例。
 
@@ -160,6 +165,6 @@ mvn -DskipTests package
 | 4 | 数据库初始化脚本的执行方式与顺序、pgvector 安装步骤 | 仓库无一键脚本，待补充 |
 | 5 | 打包后可执行 jar 的确切产物路径与部署命令 | 待构建后确认 |
 | 6 | 前端工程方案（构建/部署约定） | `yudao-ui/*` 为空壳，待立项 |
-| 7 | PDF 解析依赖缺失 | 设计文档写 pdfbox 3.0.x，但当前各 pom **均未声明 pdfbox**；知识库 `allowed-file-types` 含 PDF，PDF 解析实现待确认/待补 |
+| 7 | ~~PDF 解析依赖缺失~~ **已解决** | 改用 Spring AI 官方 `spring-ai-pdf-document-reader`（底层 PDFBox 3.0.7），由 `PdfDocumentParser` 适配；`PdfDocumentParserTest` 8 条用例通过。设计文档写「pdfbox 3.0.x」的旧表述已不适用 |
 | 8 | 真实供应商 Key 的获取与联调复测流程 | 设计文档标注「待真实 Key 后复测」 |
 | 9 | 本地/开发环境之外（dev/prod）的部署与配置管理 | 待补充 |
